@@ -8,3 +8,6 @@ coverage/
 !.env.example
 .DS_Store
 *.test
+
+# Host broker persistent local job journal (may include fixture test data).
+.gqa-broker-state/
