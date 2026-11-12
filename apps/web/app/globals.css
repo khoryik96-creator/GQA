@@ -152,3 +152,32 @@ select, input { color: #dfebf6; border: 1px solid #2a4053; border-radius: 9px; b
 .check-pass { color: #77d6b5; flex: none; }
 .check-fail { color: #edb07c; flex: none; }
 .run-result > a { margin-top: 12px; }
+
+.spec-strategy { color: #c3d4e0; line-height: 1.7; font-size: 12px; margin: 0 0 19px; }
+.spec-summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+.spec-summary > span:first-child { display: flex; align-items: center; gap: 7px; color: #b4cbd7; font-size: 12px; margin-right: 5px; }
+.priority { display: inline-flex; align-items: center; border-radius: 6px; padding: 5px 7px; font-size: 10px; font-weight: 800; color: #b7ced8; background: #253748; }
+.priority.p0 { color: #ffbfab; background: #522d31; }
+.priority.p1 { color: #f5d4a2; background: #4b382d; }
+.priority.p2 { color: #b4dedb; background: #23413e; }
+.scenario-list { display: flex; flex-direction: column; gap: 9px; }
+.scenario { border: 1px solid #2b4051; border-radius: 10px; background: #101c2a; overflow: hidden; }
+.scenario > summary { display: flex; align-items: center; gap: 11px; cursor: pointer; padding: 14px 15px; list-style: none; }
+.scenario > summary::-webkit-details-marker { display: none; }
+.scenario[open] > summary { border-bottom: 1px solid #2b4051; background: #18293b; }
+.scenario-heading { flex: 1; min-width: 0; }
+.scenario-heading strong { display: block; font-size: 12px; line-height: 1.5; color: #e3edf4; }
+.scenario-heading small { display: block; color: #8199ad; font-size: 10px; margin-top: 3px; text-transform: capitalize; }
+.scenario-expand { color: #7bcbbf; font-size: 10px; white-space: nowrap; }
+.scenario-body { padding: 16px; }
+.scenario-body > p { font-size: 12px; line-height: 1.7; margin: 0 0 15px; color: #d5e3ee; }
+.scenario-columns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 15px 22px; }
+.spec-list h4 { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #8cddd0; margin: 0 0 8px; }
+.spec-list ul,.spec-list ol { margin: 0; padding-left: 20px; font-size: 11px; line-height: 1.8; color: #a7bbc9; }
+.scenario-source { margin: 13px 0 0 !important; color: #7d93a7 !important; font-size: 10px !important; }
+.spec-missing { border: 1px solid #635035; background: #322a24; border-radius: 10px; padding: 13px; margin-top: 20px; }
+.spec-missing strong { display: flex; align-items: center; gap: 7px; color: #f0cba2; font-size: 12px; }
+.spec-missing ul { padding-left: 20px; margin: 8px 0 0; color: #d0bca5; line-height: 1.7; font-size: 11px; }
+.spec-footer { display: flex; align-items: flex-start; gap: 9px; margin-top: 18px; color: #8ba3b4; font-size: 11px; line-height: 1.55; }
+.spec-footer svg { flex: none; color: #8ac9bd; }
+@media(max-width:760px) { .scenario-columns { grid-template-columns: 1fr; } }

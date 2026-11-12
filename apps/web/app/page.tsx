@@ -7,6 +7,7 @@ import {
   History, Layers3, Loader2, Plus, Search, Send, ShieldCheck,
   Smartphone, Sparkles, Target, Workflow, X, type LucideIcon
 } from "lucide-react";
+import ScenarioReview, { type TestSpecification } from "../components/ScenarioReview";
 
 type AppType = "fullstack" | "web" | "api" | "backend" | "mobile";
 type Environment = "local" | "staging" | "production";
@@ -25,6 +26,7 @@ type Plan = {
   approval_required: boolean; execution_mode: string;
   consulted_memories: MemoryReference[];
   repository_evidence: RepoSnapshot;
+  test_spec?: TestSpecification;
   status: string; created_at: string;
 };
 type SmokeCheck = { name: string; status: string; duration_ms: number; detail: string };
@@ -310,6 +312,7 @@ export default function CommandCenter() {
                       </div>
                       {latest.warnings.filter(w => !w.startsWith("Planning only")).map(w => <div className="warning-line" key={w}><AlertTriangle size={15}/>{w}</div>)}
                     </section> : <section className="card placeholder-card"><Workflow size={28}/><h3>No QA plan yet</h3><p>Submit your first testing request to generate a project-specific agent selection plan.</p></section>}
+                    {latest && <ScenarioReview spec={latest.test_spec}/>}
                     <section className="card">
                       <div className="card-head"><div><h2><Activity size={18}/> Read-only smoke execution</h2><p>Real API and Playwright checks in a separate local Docker runner.</p></div><span className="pill neutral">v0.2</span></div>
                       <form className="smoke-form" onSubmit={executeSmoke}>
