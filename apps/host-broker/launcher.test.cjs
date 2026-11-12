@@ -100,3 +100,14 @@ test("Docker CLI only receives operational environment",()=>{
  assert.equal(env.GQA_ADMIN_PASSWORD,undefined);
  assert.equal(env.DATABASE_URL,undefined);
 });
+
+test("Docker cleanup failure is never reported as successful",async()=>{
+ const stub=async(_,args)=>{
+  if(args[0]==="rm")throw Object.assign(new Error("daemon offline"),{stderr:"Cannot connect to Docker daemon"});
+  return {stdout:JSON.stringify({checks:[{name:"API",status:"passed",detail:"HTTP 200"}],
+    screenshot_base64:"",evidence:{failure_kind:"none"}})};
+ };
+ const result=await executeJob(smoke,{run:stub});
+ assert.equal(result.checks[0].status,"failed");
+ assert.equal(result.evidence.failure_kind,"worker_cleanup_failed");
+});

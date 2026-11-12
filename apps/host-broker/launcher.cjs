@@ -35,6 +35,8 @@ function containerArgs(job,name,project="gqa") {
     "--cpus","1.5","--shm-size","256m",
     "--tmpfs","/tmp:rw,nosuid,size=512m",
     "--user","pwuser","--label","com.gqa.component=ephemeral-job",
+    "--label","com.gqa.project="+project,
+    "--label","com.gqa.job-id="+name.substring("gqa-qa-".length),
     "--env","GQA_JOB_SPEC="+encoded,
     IMAGE,"node","/worker/container-job.cjs"
   ];
@@ -57,25 +59,42 @@ function validateResult(result,id) {
   const evidence=result.evidence || {};
   return {...result,evidence:{...evidence,job_id:id,worker_lifecycle:"ephemeral_container"}};
 }
-async function executeJob(job,{project="gqa",run=exec,timeoutMs=55000}={}) {
-  const id=crypto.randomUUID();
+const JOB_ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+async function removeJobContainer(id,{run=exec}={}){
+  if(!JOB_ID.test(id))throw new Error("Invalid container cleanup identity");
+  const name="gqa-qa-"+id;
+  try{
+    await run("docker",["rm","-f",name],{timeout:8000,maxBuffer:20000,
+      windowsHide:true,env:dockerClientEnv(process.env)});
+  }catch(err){
+    if(/No such container/i.test(String(err.stderr||"")))return;
+    throw err;
+  }
+}
+
+async function executeJob(job,{project="gqa",run=exec,timeoutMs=55000,
+  id=crypto.randomUUID(),signal}={}) {
+  if(!JOB_ID.test(id))throw new Error("Invalid generated job identity");
   const name="gqa-qa-"+id;
   let result;
   try {
     const args=containerArgs(job,name,project);
     const answer=await run("docker",args,{timeout:timeoutMs,maxBuffer:2200000,
-      windowsHide:true,killSignal:"SIGKILL",env:dockerClientEnv(process.env)});
+      windowsHide:true,killSignal:"SIGKILL",signal,env:dockerClientEnv(process.env)});
     const output=answer.stdout.trim();
     if (output.length>1950000 || output.includes("\n")) return failure("invalid_worker_result",id);
     result=validateResult(JSON.parse(output),id);
   } catch (err) {
-    result=failure(err.killed || err.signal==="SIGKILL"?"worker_timeout":"worker_error",id);
+    result=failure(signal?.aborted?"worker_cancelled":
+      err.killed || err.signal==="SIGKILL"?"worker_timeout":"worker_error",id);
   } finally {
     // The CLI may have timed out while its container continued. Make a
     // second best-effort cleanup attempt by exact generated container name.
-    await run("docker",["rm","-f",name],{timeout:8000,maxBuffer:20000,
-      windowsHide:true,env:dockerClientEnv(process.env)}).catch(()=>{});
+    try { await removeJobContainer(id,{run}); }
+    catch { result=failure("worker_cleanup_failed",id); }
   }
   return result;
 }
-module.exports={FIXTURES,IMAGE,safeProjectName,dockerClientEnv,containerArgs,failure,validateResult,executeJob};
+module.exports={FIXTURES,IMAGE,safeProjectName,dockerClientEnv,
+  containerArgs,failure,validateResult,executeJob,removeJobContainer};
