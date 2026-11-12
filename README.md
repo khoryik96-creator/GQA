@@ -268,3 +268,61 @@ button, and the success of a reviewed replay.
 **Not implemented yet:** disposable per-test VM/container orchestration,
 multi-user project permissions, semantic visual analysis, durable job queues,
 browser sandboxing and production-grade evidence retention policies.
+
+
+## v0.8 — Multiple users and project-scoped access
+
+GQA now supports separately authenticated accounts and explicit project roles.
+The platform administrator is bootstrapped on first startup using the existing
+`GQA_ADMIN_PASSWORD` in the local `.env` file with email
+`admin@gqa.local`. **This is a one-time bootstrap:** password changes to
+`.env` after the account is created do not overwrite the stored password.
+The initial password must be 16–72 **bytes** for bcrypt.
+
+All previously issued v0.6 single-admin sessions are invalidated by the
+v0.8 migration. Sign in again with `admin@gqa.local` and the original
+administrator password. Existing projects, plans, tests and memories remain
+in the same PostgreSQL database. Global admins retain access to existing projects.
+
+### Provisioning a teammate
+
+1. Sign in as `admin@gqa.local`.
+2. Open a project and select **Team Access**.
+3. Under **Create teammate account**, enter an email address and a unique
+   16–72-character password; communicate the credential securely.
+4. Assign their existing account to that project with one of the four roles.
+5. Ask the teammate to sign in using their own account email and password.
+
+Accounts are **created only by the global administrator**. Project owners
+can assign existing accounts, change their project roles and revoke access.
+Role changes are audited, checked on every request and take effect without
+requiring the affected person to sign out.
+
+### Permission matrix
+
+| Action | Global admin | Project owner | QA engineer | Reviewer | Viewer |
+| --- | --- | --- | --- | --- | --- |
+| View allowed project, history, tests and screenshots | Yes | Yes | Yes | Yes | Yes |
+| Create and modify QA plans, memory and test flows | Yes | Yes | Yes | No | No |
+| Execute approved smoke/browser tests | Yes | Yes | Yes | No | No |
+| Confirm previously passed repair proposals | Yes | Yes | No | Yes | No |
+| Assign or revoke project membership | Yes | Yes | No | No | No |
+| Create project and account | Yes | No | No | No | No |
+
+A member can see only projects to which they have been assigned. An
+unassigned account has **no project access**, even if that account can
+authenticate. Screenshot routes check the actual run's project before
+delivering any image.
+
+All project-member changes are recorded in `project_access_audit` with
+actor, target account, previous role, new role and timestamp. Owners cannot
+downgrade or remove their own membership through the team-management API.
+
+### Remaining security work
+
+This is an **early local multi-user RBAC implementation**, not commercial
+multi-tenant security. It does not have organizations, self-service password
+resets, password invitations, email confirmation, MFA, SSO, distributed
+rate limits, external staging worker pools, formal security assessment,
+disposable VM execution or strong browser isolation. Tests already started
+may finish even after a member is revoked. Do not publicly deploy GQA.
