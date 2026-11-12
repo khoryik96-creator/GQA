@@ -84,4 +84,3 @@ func TestModelProviderJSONAndModelFailure(t *testing.T){
  provider.URL=bad.URL
  if _,err:=provider.generate(context.Background(),input);err==nil{t.Fatal("503 should be an error")}
 }
-

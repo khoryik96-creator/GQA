@@ -407,4 +407,3 @@ func (s *server) plans(w http.ResponseWriter, r *http.Request) {
   if err = tx.Commit(r.Context()); err != nil { fail(w,500,"Unable to commit QA plan"); return }
   writeJSON(w,201,plan)
 }
-
