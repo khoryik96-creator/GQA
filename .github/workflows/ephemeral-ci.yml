@@ -179,13 +179,27 @@ jobs:
           export GQA_HOST_BROKER_BIND=0.0.0.0
           node apps/host-broker/index.cjs >>/tmp/gqa-host-broker.log 2>&1 &
           echo $! >/tmp/gqa-host-broker.pid
+          restarted=0
           for n in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:18090/healthz >/dev/null; then
+              restarted=1
               break
             fi
             sleep 1
           done
-          test "$(python3 -c 'import json; x=json.load(open(".gqa-broker-state/jobs.json")); print(any(j["status"]=="passed" for j in x))')" = "True"
+          test "$restarted" = "1"
+          python3 - <<'PY'
+          import urllib.request, json
+          with open(".env",encoding="utf-8") as stream:
+              token=next(line.split("=",1)[1].strip() for line in stream
+                  if line.startswith("GQA_RUNNER_TOKEN="))
+          req=urllib.request.Request("http://127.0.0.1:18090/jobs",
+              headers={"X-GQA-Runner-Token":token})
+          with urllib.request.urlopen(req,timeout=5) as response:
+              statuses=json.load(response)
+          assert any(job["status"]=="passed" for job in statuses),statuses
+          print("PASS: persisted broker jobs restored after full process restart")
+          PY
       - name: Confirm no disposable job containers remain
         run: |
           if test -n "$(docker ps -aq --filter 'label=com.gqa.component=ephemeral-job')"; then
