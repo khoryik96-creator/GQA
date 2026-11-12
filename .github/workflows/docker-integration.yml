@@ -91,7 +91,65 @@ jobs:
               assert exc.code == 403, exc.code
           else:
               raise AssertionError("Production plan unexpectedly executable")
-          print("PASS: memory-aware QA planning, real API/browser checks, screenshot, production block")
+
+          flow = request(f"/api/projects/{project_id}/flows", {
+              "plan_id": plan["id"],
+              "prompt": "Open the demo app, click Show details and verify fixture details are visible"
+          })
+          assert flow["generation_mode"] == "rules", flow
+          assert len(flow["steps"]) >= 4, flow
+          assert any(x["op"] == "assert_text" for x in flow["steps"]), flow
+          assert len(flow["digest"]) == 64, flow
+
+          try:
+              request(f"/api/projects/{project_id}/flows/{flow['id']}/execute", {
+                  "target_url": "http://fixture:8081",
+                  "acknowledged_digest": "0" * 64
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 403
+          else:
+              raise AssertionError("Unreviewed browser flow unexpectedly ran")
+
+          browser_run = request(f"/api/projects/{project_id}/flows/{flow['id']}/execute", {
+              "target_url": "http://fixture:8081",
+              "acknowledged_digest": flow["digest"]
+          })
+          assert browser_run["status"] == "passed", browser_run
+          assert browser_run["execution_kind"] == "browser_flow", browser_run
+          assert browser_run["flow_id"] == flow["id"], browser_run
+          assert all(x["status"] == "passed" for x in browser_run["checks"]), browser_run
+          assert len(browser_run["checks"]) >= 4, browser_run
+          assert browser_run["screenshot_available"], browser_run
+
+          email_flow = request(f"/api/projects/{project_id}/flows", {
+              "plan_id": plan["id"],
+              "prompt": "Fill email and preview email confirmation on the demo fixture"
+          })
+          email_run = request(f"/api/projects/{project_id}/flows/{email_flow['id']}/execute", {
+              "target_url": "http://fixture:8081",
+              "acknowledged_digest": email_flow["digest"]
+          })
+          assert email_run["status"] == "passed", email_run
+
+          production_flow = request(f"/api/projects/{project_id}/flows", {
+              "plan_id": production_plan["id"],
+              "prompt": "Verify the browser homepage for production deployment"
+          })
+          try:
+              request(f"/api/projects/{project_id}/flows/{production_flow['id']}/execute", {
+                  "target_url": "http://fixture:8081",
+                  "acknowledged_digest": production_flow["digest"]
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 403
+          else:
+              raise AssertionError("Production browser flow unexpectedly executed")
+
+          with urllib.request.urlopen(BASE + f"/api/projects/{project_id}/runs") as response:
+              historical = json.loads(response.read().decode("utf-8"))
+          assert any(x.get("flow_id") == flow["id"] for x in historical)
+          print("PASS: memory-aware QA planning, real API/browser checks, screenshot, production block, typed browser flows and review digests")
           PY
 
       - name: Stack diagnostics on failure

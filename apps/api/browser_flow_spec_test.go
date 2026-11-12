@@ -1,6 +1,12 @@
 package main
 
-import "testing"
+import (
+ "testing"
+ "context"
+ "encoding/json"
+ "net/http"
+ "net/http/httptest"
+)
 
 func TestBrowserActionValidation(t *testing.T){
   good:=[]BrowserAction{{Op:"navigate",Path:"/"},{Op:"click_role",Role:"button",Name:"Show details"},
@@ -23,4 +29,19 @@ func TestFixtureFallbackIsExplicitAndHasAssertion(t *testing.T){
   if err:=validBrowserActions(draft.Steps);err!=nil{t.Fatal(err)}
   if draft.Warning==""{t.Fatal("offline fallback needs disclosure")}
   if browserFlowDigest(draft.Steps)==""{t.Fatal("flow digest missing")}
+}
+
+func TestModelBrowserFlowProvider(t *testing.T){
+  server:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+    if r.Header.Get("Authorization")!="Bearer test-key"{t.Errorf("missing authorization")}
+    raw:=`{"objective":"Check the fixture","steps":[{"op":"navigate","path":"/"},{"op":"assert_visible_role","role":"heading","name":"GQA Read-Only Smoke Target"}]}`
+    encoded,_:=json.Marshal(raw)
+    w.Header().Set("Content-Type","application/json")
+    w.Write([]byte(`{"choices":[{"message":{"content":`+string(encoded)+`}}]}`))
+  }))
+  defer server.Close()
+  p:=planningProvider{URL:server.URL,Model:"mock",Key:"test-key",Client:server.Client()}
+  result,err:=p.proposeBrowserFlow(context.Background(),BrowserFlowContext{Prompt:"Verify homepage"})
+  if err!=nil{t.Fatal(err)}
+  if result.GenerationMode!="model"||len(result.Steps)!=2{t.Fatalf("bad model draft: %#v",result)}
 }
