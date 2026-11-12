@@ -19,11 +19,33 @@ services:
       DATABASE_URL: postgres://gqa:gqa_local_only@db:5432/gqa?sslmode=disable
       PORT: "8080"
       ALLOWED_ORIGIN: http://localhost:3000
+      GQA_RUNNER_URL: http://runner:8090/run
+      GQA_RUNNER_TOKEN: gqa_local_dev_runner_token_only
+      GQA_SMOKE_TARGETS: http://fixture:8081
+      GQA_EVIDENCE_DIR: /evidence
     ports:
       - "127.0.0.1:8080:8080"
+    volumes:
+      - gqa_evidence:/evidence
     depends_on:
       db:
         condition: service_healthy
+      runner:
+        condition: service_started
+      fixture:
+        condition: service_started
+
+  runner:
+    build: ./apps/runner
+    init: true
+    environment:
+      GQA_RUNNER_TOKEN: gqa_local_dev_runner_token_only
+      GQA_SMOKE_TARGETS: http://fixture:8081
+    depends_on:
+      - fixture
+
+  fixture:
+    build: ./apps/fixture
 
   web:
     build:
@@ -37,3 +59,4 @@ services:
 
 volumes:
   gqa_pgdata:
+  gqa_evidence:

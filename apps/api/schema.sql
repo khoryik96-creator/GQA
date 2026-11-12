@@ -42,3 +42,24 @@ CREATE TABLE IF NOT EXISTS plans (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS plans_project_created ON plans (project_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS repo_inspections (
+  project_id UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  snapshot JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS consulted_memories JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS repo_context JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE TABLE IF NOT EXISTS test_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  plan_id UUID NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  target_url TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('running','passed','failed')),
+  checks JSONB NOT NULL DEFAULT '[]'::jsonb,
+  screenshot_available BOOLEAN NOT NULL DEFAULT false,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS test_runs_project_started ON test_runs(project_id,started_at DESC);
