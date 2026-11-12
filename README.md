@@ -125,3 +125,44 @@ plans remain disabled.
 - v0.5: isolated ephemeral runners, versioned cache, evidence-first self-healing,
   flaky-test classification and authenticated project permissions.
 - v0.6: optional semantic/visual assertions, multiple-model arbitration and budgets.
+
+## v0.5 — Evidence-driven locator repair and historical lessons
+
+GQA records failures before making any repair suggestion. A renamed accessible
+button/link can produce a **possible locator repair** only when the original
+locator no longer resolves and exactly one sufficiently similar visible label
+exists. The runner does not edit actions, bypass assertions or retry silently.
+
+### Demonstrate the repair workflow
+
+1. Create a full-stack project and a Web QA plan.
+2. In Browser Flow Studio, draft a flow mentioning **Show details**.
+3. Run it against `http://fixture-renamed:8081` (a second included fixture where
+   the button was deliberately renamed to **Reveal details**). Review the
+   original actions and digest before executing.
+4. Inspect the failed browser step and its tentative locator suggestion.
+5. Click **Create reviewable repair proposal**. This produces a **new immutable
+   flow**, changing only the clicked button's accessible name. All original
+   assertions are retained. It is not automatically executed.
+6. Review the new flow digest, authorize the same target, and replay it.
+7. After a passing run, enter an application revision and explicitly
+   choose **Confirm and save verified repair**.
+
+GQA stores the original failed run, revised flow, passing replay, reviewer
+confirmation, application revision, an audit trail, a project lesson, and
+a **14-day version-scoped cache hint**. The cache hint is informational: GQA
+does **not** automatically reuse corrected locators across versions or silently
+modify other tests.
+
+### Current limits
+
+- Repair suggestions are restricted to accessible names of **buttons and links**.
+- Suggestions are similarity-based, not proof that a changed UI remains correct.
+- No automated regression classification, flaky-test detection, full visual
+  comparison, or autonomous multi-step fixing yet.
+- Production and active testing restrictions are unchanged.
+- The application remains a local-only unauthenticated prototype. Never
+  expose it publicly or test systems without authorization.
+
+v0.6 should add robust auth and per-run isolation before expanding autonomy,
+alongside optional semantic/visual assertions and trace-based failure analysis.
