@@ -3,6 +3,7 @@ import "./globals.css";
 import "./browser-flow.css";
 import "./team.css";
 import "./account-security.css";
+import "./broker-jobs.css";
 
 export const metadata: Metadata = {
   title: "GQA | Principal QA Command Center",

@@ -1,0 +1,9 @@
+.broker-jobs {margin-top:20px}
+.broker-job-list {display:flex;flex-direction:column;gap:8px}
+.broker-job-row {display:flex;align-items:center;gap:11px;border:1px solid #2d4556;background:#14293b;padding:12px;border-radius:10px}
+.broker-job-identity {flex:1;min-width:0}
+.broker-job-identity strong {display:block;font-size:12px;overflow-wrap:anywhere;color:#e0eaf0}
+.broker-job-identity small {display:block;margin-top:4px;font-size:10px;color:#8fa9bb}
+.broker-job-row .button {padding:6px 10px;min-height:31px;font-size:11px}
+.broker-jobs .fine-print {margin-top:16px}
+@media(max-width:720px){.broker-job-row {flex-wrap:wrap}}
