@@ -8,6 +8,7 @@ import {
   Smartphone, Sparkles, Target, Workflow, X, type LucideIcon
 } from "lucide-react";
 import ScenarioReview, { type TestSpecification } from "../components/ScenarioReview";
+import BrowserFlowStudio from "../components/BrowserFlowStudio";
 
 type AppType = "fullstack" | "web" | "api" | "backend" | "mobile";
 type Environment = "local" | "staging" | "production";
@@ -313,6 +314,15 @@ export default function CommandCenter() {
                       {latest.warnings.filter(w => !w.startsWith("Planning only")).map(w => <div className="warning-line" key={w}><AlertTriangle size={15}/>{w}</div>)}
                     </section> : <section className="card placeholder-card"><Workflow size={28}/><h3>No QA plan yet</h3><p>Submit your first testing request to generate a project-specific agent selection plan.</p></section>}
                     {latest && <ScenarioReview spec={latest.test_spec}/>}
+                    <BrowserFlowStudio
+                      key={selectedId}
+                      projectId={selectedId!}
+                      planId={latest?.id}
+                      hasWeb={!!latest?.selected_agents.some(a => a.id === "web")}
+                      canRun={!!latest && !latest.approval_required && latest.environment !== "production" &&
+                        latest.selected_agents.some(a => a.id === "web")}
+                      apiBase={API}
+                    />
                     <section className="card">
                       <div className="card-head"><div><h2><Activity size={18}/> Read-only smoke execution</h2><p>Real API and Playwright checks in a separate local Docker runner.</p></div><span className="pill neutral">v0.2</span></div>
                       <form className="smoke-form" onSubmit={executeSmoke}>

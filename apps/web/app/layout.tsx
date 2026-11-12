@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./browser-flow.css";
 
 export const metadata: Metadata = {
   title: "GQA | Principal QA Command Center",

@@ -1,0 +1,189 @@
+"use client";
+
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  AlertTriangle, ArrowRight, CheckCircle2, CircleCheck, ClipboardCheck,
+  FileCode2, Loader2, Play, ShieldAlert, WandSparkles
+} from "lucide-react";
+
+type BrowserAction = {
+  op: string; path?: string; role?: string; name?: string;
+  label?: string; value?: string; text?: string;
+};
+type BrowserFlow = {
+  id: string; project_id: string; plan_id: string; prompt: string;
+  objective: string; steps: BrowserAction[]; digest: string;
+  generation_mode: "rules" | "model"; warning: string; created_at: string;
+};
+type SmokeCheck = { name: string; status: string; detail: string; duration_ms: number };
+type TestRun = {
+  id: string; flow_id?: string; status: string; checks: SmokeCheck[];
+  screenshot_available: boolean; started_at: string; execution_kind: string;
+};
+type Props = {
+  projectId: string;
+  planId?: string;
+  canRun: boolean;
+  hasWeb: boolean;
+  apiBase: string;
+};
+
+function describeAction(a: BrowserAction) {
+  switch (a.op) {
+    case "navigate": return "Navigate to " + a.path;
+    case "click_role": return "Click " + a.role + ' “' + a.name + "”";
+    case "fill_label": return "Fill “" + a.label + "” with demo data";
+    case "assert_text": return 'Verify visible text “' + a.text + "”";
+    case "assert_visible_role": return "Verify " + a.role + ' “' + a.name + "” is visible";
+    case "assert_url_path": return "Verify URL path is " + a.path;
+    default: return "Unknown action";
+  }
+}
+
+async function requestJSON<T>(api: string, path: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(api + path, {
+    ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    cache: "no-store"
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ error: "Request failed" }));
+    throw new Error(body.error || "Request failed");
+  }
+  return resp.json() as Promise<T>;
+}
+
+export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, apiBase }: Props) {
+  const [prompt, setPrompt] = useState("Open the homepage, click Show details and verify the detail panel is visible.");
+  const [target, setTarget] = useState("http://fixture:8081");
+  const [flows, setFlows] = useState<BrowserFlow[]>([]);
+  const [runs, setRuns] = useState<TestRun[]>([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [error, setError] = useState("");
+  const visible = useMemo(() => flows.filter(f => f.plan_id === planId), [flows, planId]);
+  const selected = visible.find(f => f.id === selectedId) || visible[0];
+  const latestRun = runs.find(r => r.flow_id === selected?.id);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFlows([]); setRuns([]); setSelectedId(""); setAcknowledged(false); setError("");
+    Promise.all([
+      requestJSON<BrowserFlow[]>(apiBase, "/api/projects/" + projectId + "/flows"),
+      requestJSON<TestRun[]>(apiBase, "/api/projects/" + projectId + "/runs")
+    ]).then(([newFlows, newRuns]) => {
+      if (!cancelled) { setFlows(newFlows); setRuns(newRuns); }
+    }).catch(err => { if (!cancelled) setError(err.message); });
+    return () => { cancelled = true; };
+  }, [projectId, apiBase]);
+
+  async function draftFlow(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!planId) return;
+    setDrafting(true); setError(""); setAcknowledged(false);
+    try {
+      const draft = await requestJSON<BrowserFlow>(apiBase, "/api/projects/" + projectId + "/flows", {
+        method: "POST", body: JSON.stringify({ plan_id: planId, prompt })
+      });
+      setFlows(existing => [draft, ...existing]);
+      setSelectedId(draft.id);
+    } catch (err) { setError((err as Error).message); }
+    finally { setDrafting(false); }
+  }
+
+  async function executeFlow() {
+    if (!selected || !acknowledged || !canRun) return;
+    setExecuting(true); setError("");
+    try {
+      const run = await requestJSON<TestRun>(
+        apiBase, "/api/projects/" + projectId + "/flows/" + selected.id + "/execute", {
+          method: "POST",
+          body: JSON.stringify({ target_url: target, acknowledged_digest: selected.digest })
+        }
+      );
+      setRuns(existing => [run, ...existing]);
+      setAcknowledged(false);
+    } catch (err) { setError((err as Error).message); }
+    finally { setExecuting(false); }
+  }
+
+  return (
+    <section className="card browser-studio">
+      <div className="card-head">
+        <div>
+          <h2><WandSparkles size={18}/> Browser Flow Studio</h2>
+          <p>Turn a natural-language request into a reviewed Playwright action sequence.</p>
+        </div>
+        <span className="pill neutral">v0.4</span>
+      </div>
+      {!hasWeb && <div className="notice">
+        <ShieldAlert size={17}/>
+        <span>First create a QA plan that selects the Web QA specialist. Browser flow execution is gated by the original plan.</span>
+      </div>}
+      <form onSubmit={draftFlow} className="browser-draft-form">
+        <label>Describe the browser journey to test
+          <textarea value={prompt} onChange={e => setPrompt(e.target.value)} minLength={10} maxLength={2000} rows={3}
+            placeholder="Open the app, click Show details, and verify that details are displayed."/>
+        </label>
+        <button className="button secondary" type="submit" disabled={!planId || !hasWeb || drafting}>
+          {drafting ? <Loader2 size={16} className="spin"/> : <FileCode2 size={16}/>}
+          {drafting ? "Drafting steps..." : "Draft browser flow"}
+        </button>
+      </form>
+
+      {error && <div className="browser-flow-error"><AlertTriangle size={16}/>{error}</div>}
+      {visible.length>0 && <div className="browser-flow-review">
+        {visible.length > 1 && <label>Saved flows for current plan
+          <select value={selected?.id || ""} onChange={e => {setSelectedId(e.target.value); setAcknowledged(false);}}>
+            {visible.map(f => <option key={f.id} value={f.id}>{f.prompt.slice(0,75)}</option>)}
+          </select>
+        </label>}
+        {selected && <>
+          <div className="browser-flow-head">
+            <strong>Review: {selected.objective}</strong>
+            <span className={"pill " + (selected.generation_mode==="model" ? "" : "neutral")}>
+              {selected.generation_mode==="model" ? "AI drafted" : "Fixture demo"}
+            </span>
+          </div>
+          <p className="browser-flow-warning"><ShieldAlert size={15}/>{selected.warning}</p>
+          <ol className="typed-actions">
+            {selected.steps.map((step,i) => <li key={i}>
+              <span>{String(i+1).padStart(2,"0")}</span>
+              <div><strong>{step.op.replaceAll("_"," ")}</strong><p>{describeAction(step)}</p></div>
+              {step.op.startsWith("assert_") && <CircleCheck size={16}/>}
+            </li>)}
+          </ol>
+          <div className="browser-execution-control">
+            <label>Approved test origin
+              <input value={target} onChange={e => {setTarget(e.target.value);setAcknowledged(false);}}
+                placeholder="http://fixture:8081"/>
+            </label>
+            <label className="browser-acknowledge">
+              <input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)}/>
+              <span>I reviewed every action and assertion, and this target is authorized for testing.</span>
+            </label>
+            <button type="button" className="button primary" disabled={!canRun || !acknowledged || executing} onClick={executeFlow}>
+              {executing ? <Loader2 size={16} className="spin"/> : <Play size={16}/>}
+              {executing ? "Running Playwright..." : "Execute reviewed flow"}
+            </button>
+            {!canRun && <p className="fine-print">Execution blocked: this plan is missing Web QA or requires restricted-environment approval.</p>}
+          </div>
+        </>}
+        {latestRun && <div className="browser-flow-result">
+          <div className="run-heading"><strong><ClipboardCheck size={16}/> Browser flow results</strong>
+            <span className={"pill " + (latestRun.status==="passed" ? "" : "warning")}>{latestRun.status}</span>
+          </div>
+          {latestRun.checks.map((check,index) => <div className="check-row" key={index}>
+            {check.status==="passed" ? <CheckCircle2 size={16} className="check-pass"/> : <AlertTriangle size={16} className="check-fail"/>}
+            <div><strong>{check.name}</strong><p>{check.detail} · {check.duration_ms}ms</p></div>
+          </div>)}
+          {latestRun.screenshot_available && <a className="text-button" target="_blank" rel="noreferrer"
+            href={apiBase + "/api/runs/" + latestRun.id + "/screenshot"}>
+            Inspect screenshot <ArrowRight size={15}/>
+          </a>}
+        </div>}
+      </div>}
+    </section>
+  );
+}

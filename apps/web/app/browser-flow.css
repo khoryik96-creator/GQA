@@ -1,0 +1,24 @@
+.browser-draft-form label, .browser-flow-review label { display: flex; flex-direction: column; gap: 9px; color: #a7becb; font-size: 12px; }
+.browser-draft-form textarea { width: 100%; resize: vertical; border: 1px solid #2b4355; background: #0d1724; color: #e6f0fa; border-radius: 11px; padding: 13px; line-height: 1.6; font-size: 13px; }
+.browser-draft-form .button { margin-top: 13px; }
+.browser-flow-review { margin-top: 20px; padding-top: 18px; border-top: 1px solid #284057; }
+.browser-flow-review select { width: 100%; }
+.browser-flow-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 15px 0 10px; }
+.browser-flow-head strong { font-size: 12px; line-height: 1.6; color: #d8e9f0; }
+.browser-flow-warning { background: #3c3426; border: 1px solid #6c5235; padding: 11px; display: flex; align-items: flex-start; gap: 8px; color: #edcda2; border-radius: 9px; font-size: 11px; line-height: 1.65; }
+.browser-flow-warning svg { flex: none; }
+.typed-actions { padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; margin: 18px 0; }
+.typed-actions li { display: flex; gap: 12px; padding: 12px; background: #132338; border: 1px solid #294052; border-radius: 10px; align-items: flex-start; }
+.typed-actions li > span { font-size: 11px; font-weight: 800; color: #78dace; padding-top: 2px; }
+.typed-actions li > div { flex: 1; }
+.typed-actions li strong { font-size: 11px; text-transform: capitalize; }
+.typed-actions li p { font-size: 11px; line-height: 1.6; margin: 5px 0 0; color: #b2c5d2; }
+.typed-actions li svg { flex: none; color: #6dd4b5; }
+.browser-execution-control { border-top: 1px solid #2a4055; padding-top: 17px; display: flex; flex-direction: column; gap: 13px; }
+.browser-execution-control input:not([type="checkbox"]) { width: 100%; }
+.browser-acknowledge { display: flex !important; flex-direction: row !important; align-items: start; gap: 9px !important; cursor: pointer; }
+.browser-acknowledge input { accent-color: #65daca; margin-top: 3px; }
+.browser-acknowledge span { line-height: 1.6; }
+.browser-flow-result { margin-top: 18px; border-top: 1px solid #2b4055; padding-top: 18px; }
+.browser-flow-result .run-heading strong { display: flex; gap: 8px; align-items: center; }
+.browser-flow-error { display: flex; gap: 8px; margin-top: 13px; padding: 10px; font-size: 12px; color: #ffb4af; border-radius: 8px; background: #43262c; }
