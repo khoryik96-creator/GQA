@@ -63,3 +63,6 @@ CREATE TABLE IF NOT EXISTS test_runs (
   finished_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS test_runs_project_started ON test_runs(project_id,started_at DESC);
+
+-- Structured plan proposals are never marked as executed tests.
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS test_spec JSONB NOT NULL DEFAULT '{}'::jsonb;

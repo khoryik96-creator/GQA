@@ -75,3 +75,22 @@ The next milestone is authenticated access for private repositories, authenticat
 - `apps/web` — Next.js command center
 - `compose.yaml` — local container stack
 - `.github/workflows/ci.yml` — Go tests and frontend build checks
+
+## v0.3 — Structured principal QA planning
+
+GQA generates a **reviewable test specification** with a strategy, ranked scenarios (P0-P2), preconditions, execution steps, expected results, missing inputs and confirmed project-memory references. Planning output is **not executable code** and does not count as test execution.
+
+The default planner is deterministic and displays **rules** as the generation mode. Optionally enable an OpenAI-compatible chat completions provider to generate more contextual scenarios. The API validates every model scenario against the selected agents and existing memory IDs, overwrites untrusted status/ID fields and falls back to a rules-based plan if the provider fails.
+
+Create a root `.env` file for Docker Compose (never commit it):
+
+```dotenv
+GQA_LLM_CHAT_COMPLETIONS_URL=https://your-approved-provider.example/v1/chat/completions
+GQA_LLM_MODEL=your-approved-model
+GQA_LLM_API_KEY=your-private-provider-key
+GQA_LLM_SEND_PROJECT_CONTEXT=true
+```
+
+**Privacy:** The opt-in is required because the model receives the request, selected agent descriptions, repository metadata and confirmed project-memory excerpts. Keep sensitive customer information out of project memory unless your provider, consent and data handling policies permit transmitting it. The application remains local-only and unauthenticated.
+
+The model is used only to **draft scenarios**. It cannot approve production testing, execute scripts, change agent permissions or claim that anything has passed. The action runner remains policy-controlled and restricted to its fixed smoke operations.

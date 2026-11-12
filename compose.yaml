@@ -23,6 +23,10 @@ services:
       GQA_RUNNER_TOKEN: gqa_local_dev_runner_token_only
       GQA_SMOKE_TARGETS: http://fixture:8081
       GQA_EVIDENCE_DIR: /evidence
+      GQA_LLM_CHAT_COMPLETIONS_URL: ${GQA_LLM_CHAT_COMPLETIONS_URL:-}
+      GQA_LLM_MODEL: ${GQA_LLM_MODEL:-}
+      GQA_LLM_API_KEY: ${GQA_LLM_API_KEY:-}
+      GQA_LLM_SEND_PROJECT_CONTEXT: ${GQA_LLM_SEND_PROJECT_CONTEXT:-false}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:

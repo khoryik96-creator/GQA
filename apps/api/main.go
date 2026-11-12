@@ -58,6 +58,7 @@ type Plan struct {
   Status           string           `json:"status"`
   ConsultedMemories []MemoryReference `json:"consulted_memories"`
   RepositoryEvidence RepoSnapshot   `json:"repository_evidence"`
+  TestSpec         TestSpecification `json:"test_spec"`
   CreatedAt        time.Time        `json:"created_at"`
 }
 
@@ -265,18 +266,18 @@ func (s *server) plans(w http.ResponseWriter, r *http.Request) {
   if !ok { return }
   if r.Method == http.MethodGet {
     rows, err := s.db.Query(r.Context(),
-      "SELECT p.id::text,p.project_id::text,p.request_id::text,q.prompt,q.environment,p.selected_agents,p.warnings,p.approval_required,p.status,p.created_at,p.consulted_memories,p.repo_context FROM plans p JOIN qa_requests q ON q.id=p.request_id WHERE p.project_id=$1::uuid ORDER BY p.created_at DESC LIMIT 50",
+      "SELECT p.id::text,p.project_id::text,p.request_id::text,q.prompt,q.environment,p.selected_agents,p.warnings,p.approval_required,p.status,p.created_at,p.consulted_memories,p.repo_context,p.test_spec FROM plans p JOIN qa_requests q ON q.id=p.request_id WHERE p.project_id=$1::uuid ORDER BY p.created_at DESC LIMIT 50",
       id)
     if err != nil { fail(w,500,"Unable to retrieve plans"); return }
     defer rows.Close()
     plans := []Plan{}
     for rows.Next() {
       var p Plan
-      var agentsJSON, warningsJSON, memoriesJSON, repoJSON []byte
-      if err := rows.Scan(&p.ID,&p.ProjectID,&p.RequestID,&p.Prompt,&p.Environment,&agentsJSON,&warningsJSON,&p.ApprovalRequired,&p.Status,&p.CreatedAt,&memoriesJSON,&repoJSON); err != nil {
+      var agentsJSON, warningsJSON, memoriesJSON, repoJSON, specJSON []byte
+      if err := rows.Scan(&p.ID,&p.ProjectID,&p.RequestID,&p.Prompt,&p.Environment,&agentsJSON,&warningsJSON,&p.ApprovalRequired,&p.Status,&p.CreatedAt,&memoriesJSON,&repoJSON,&specJSON); err != nil {
         fail(w,500,"Unable to read plans"); return
       }
-      if json.Unmarshal(agentsJSON,&p.SelectedAgents) != nil || json.Unmarshal(warningsJSON,&p.Warnings) != nil || json.Unmarshal(memoriesJSON,&p.ConsultedMemories) != nil || json.Unmarshal(repoJSON,&p.RepositoryEvidence) != nil {
+      if json.Unmarshal(agentsJSON,&p.SelectedAgents) != nil || json.Unmarshal(warningsJSON,&p.Warnings) != nil || json.Unmarshal(memoriesJSON,&p.ConsultedMemories) != nil || json.Unmarshal(repoJSON,&p.RepositoryEvidence) != nil || json.Unmarshal(specJSON,&p.TestSpec) != nil {
         fail(w,500,"Invalid stored plan"); return
       }
       p.ExecutionMode = "plan_only"
@@ -313,10 +314,16 @@ func (s *server) plans(w http.ResponseWriter, r *http.Request) {
   enrichedStack,enrichedPrompt:=enrichedPlanningContext(stack,input.Prompt,snapshot,memories)
   decision := selectAgents(appType,enrichedStack,enrichedPrompt,input.Environment)
   if repoWarning!=""{decision.Warnings=append(decision.Warnings,repoWarning)}
+  spec:=generateTestSpecification(r.Context(),PlannerInput{
+    Prompt:input.Prompt,Environment:input.Environment,
+    Application:appType,Stack:enrichedStack,
+    Agents:decision.Agents,Memories:memories,Repository:snapshot,
+  })
   agentsJSON, _ := json.Marshal(decision.Agents)
   warningsJSON, _ := json.Marshal(decision.Warnings)
   memoriesJSON,_:=json.Marshal(memories)
   repoJSON,_:=json.Marshal(snapshot)
+  specJSON,_:=json.Marshal(spec)
   tx, err := s.db.Begin(r.Context())
   if err != nil { fail(w,500,"Unable to start plan transaction"); return }
   defer tx.Rollback(r.Context())
@@ -331,13 +338,14 @@ func (s *server) plans(w http.ResponseWriter, r *http.Request) {
   plan.Status="draft"
   plan.ConsultedMemories=memories
   plan.RepositoryEvidence=snapshot
+  plan.TestSpec=spec
   err = tx.QueryRow(r.Context(),
     "INSERT INTO qa_requests (project_id,prompt,environment) VALUES ($1::uuid,$2,$3) RETURNING id::text",
     id,input.Prompt,input.Environment).Scan(&plan.RequestID)
   if err != nil { fail(w,500,"Unable to save QA request"); return }
   err = tx.QueryRow(r.Context(),
-    "INSERT INTO plans (project_id,request_id,selected_agents,warnings,approval_required,consulted_memories,repo_context) VALUES ($1::uuid,$2::uuid,$3::jsonb,$4::jsonb,$5,$6::jsonb,$7::jsonb) RETURNING id::text,created_at",
-    id,plan.RequestID,string(agentsJSON),string(warningsJSON),decision.ApprovalRequired,string(memoriesJSON),string(repoJSON)).Scan(&plan.ID,&plan.CreatedAt)
+    "INSERT INTO plans (project_id,request_id,selected_agents,warnings,approval_required,consulted_memories,repo_context,test_spec) VALUES ($1::uuid,$2::uuid,$3::jsonb,$4::jsonb,$5,$6::jsonb,$7::jsonb,$8::jsonb) RETURNING id::text,created_at",
+    id,plan.RequestID,string(agentsJSON),string(warningsJSON),decision.ApprovalRequired,string(memoriesJSON),string(repoJSON),string(specJSON)).Scan(&plan.ID,&plan.CreatedAt)
   if err != nil { fail(w,500,"Unable to save QA plan"); return }
   if err = tx.Commit(r.Context()); err != nil { fail(w,500,"Unable to commit QA plan"); return }
   writeJSON(w,201,plan)
