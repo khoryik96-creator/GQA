@@ -14,8 +14,18 @@ type BrowserFlow = {
   id: string; project_id: string; plan_id: string; prompt: string;
   objective: string; steps: BrowserAction[]; digest: string;
   generation_mode: "rules" | "model"; warning: string; created_at: string;
+  repaired_from_flow_id?: string; repaired_from_run_id?: string; repair_target?: string;
 };
-type SmokeCheck = { name: string; status: string; detail: string; duration_ms: number };
+type RepairHint = {
+  step_index: number; role: string; original_name: string; proposed_name: string;
+  confidence: number; basis: string; note: string;
+};
+type SmokeCheck = { name: string; status: string; detail: string; duration_ms: number; repair?: RepairHint };
+type RepairReview = {
+  repaired_flow_id: string; repaired_from_flow_id: string; original_failure_run_id: string;
+  target_url: string; old_name: string; new_name: string; app_revision: string;
+  memory_id: string; accepted_at: string;
+};
 type TestRun = {
   id: string; flow_id?: string; status: string; checks: SmokeCheck[];
   screenshot_available: boolean; started_at: string; execution_kind: string;
@@ -57,6 +67,10 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
   const [target, setTarget] = useState("http://fixture:8081");
   const [flows, setFlows] = useState<BrowserFlow[]>([]);
   const [runs, setRuns] = useState<TestRun[]>([]);
+  const [reviews, setReviews] = useState<RepairReview[]>([]);
+  const [repairing, setRepairing] = useState(false);
+  const [accepting, setAccepting] = useState(false);
+  const [revision, setRevision] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [drafting, setDrafting] = useState(false);
@@ -65,18 +79,24 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
   const visible = useMemo(() => flows.filter(f => f.plan_id === planId), [flows, planId]);
   const selected = visible.find(f => f.id === selectedId) || visible[0];
   const latestRun = runs.find(r => r.flow_id === selected?.id);
+  const suggestion = latestRun?.status === "failed" ?
+    latestRun.checks.find(check => check.repair)?.repair : undefined;
+  const acceptedReview = reviews.find(r => r.repaired_flow_id === selected?.id);
 
   useEffect(() => {
     let cancelled = false;
-    setFlows([]); setRuns([]); setSelectedId(""); setAcknowledged(false); setError("");
+    setFlows([]); setRuns([]); setReviews([]); setSelectedId(""); setAcknowledged(false); setError("");
     Promise.all([
       requestJSON<BrowserFlow[]>(apiBase, "/api/projects/" + projectId + "/flows"),
-      requestJSON<TestRun[]>(apiBase, "/api/projects/" + projectId + "/runs")
-    ]).then(([newFlows, newRuns]) => {
-      if (!cancelled) { setFlows(newFlows); setRuns(newRuns); }
+      requestJSON<TestRun[]>(apiBase, "/api/projects/" + projectId + "/runs"),
+      requestJSON<RepairReview[]>(apiBase, "/api/projects/" + projectId + "/repairs")
+    ]).then(([newFlows, newRuns, newReviews]) => {
+      if (!cancelled) { setFlows(newFlows); setRuns(newRuns); setReviews(newReviews); }
     }).catch(err => { if (!cancelled) setError(err.message); });
     return () => { cancelled = true; };
   }, [projectId, apiBase]);
+
+  useEffect(() => { setAcknowledged(false); }, [planId]);
 
   async function draftFlow(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -108,6 +128,40 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
     finally { setExecuting(false); }
   }
 
+
+  async function proposeRepair() {
+    if (!selected || !latestRun || !suggestion) return;
+    setRepairing(true); setError(""); setAcknowledged(false);
+    try {
+      const draft = await requestJSON<BrowserFlow>(
+        apiBase, "/api/projects/" + projectId + "/flows/" + selected.id + "/propose-repair", {
+          method: "POST", body: JSON.stringify({ failed_run_id: latestRun.id })
+        }
+      );
+      setFlows(existing => [draft, ...existing]);
+      setSelectedId(draft.id);
+      setTarget(draft.repair_target || target);
+      setRevision("");
+    } catch (err) { setError((err as Error).message); }
+    finally { setRepairing(false); }
+  }
+
+  async function acceptRepair() {
+    if (!selected?.repaired_from_run_id || !latestRun || latestRun.status !== "passed" ||
+        !revision.trim() || acceptedReview) return;
+    setAccepting(true); setError("");
+    try {
+      const review = await requestJSON<RepairReview>(
+        apiBase, "/api/projects/" + projectId + "/flows/" + selected.id + "/confirm-repair", {
+          method: "POST",
+          body: JSON.stringify({successful_run_id: latestRun.id, app_revision: revision.trim()})
+        }
+      );
+      setReviews(existing => [review, ...existing]);
+    } catch (err) { setError((err as Error).message); }
+    finally { setAccepting(false); }
+  }
+
   return (
     <section className="card browser-studio">
       <div className="card-head">
@@ -115,7 +169,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
           <h2><WandSparkles size={18}/> Browser Flow Studio</h2>
           <p>Turn a natural-language request into a reviewed Playwright action sequence.</p>
         </div>
-        <span className="pill neutral">v0.4</span>
+        <span className="pill neutral">v0.5 · repair memory</span>
       </div>
       {!hasWeb && <div className="notice">
         <ShieldAlert size={17}/>
@@ -136,17 +190,21 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
       {visible.length>0 && <div className="browser-flow-review">
         {visible.length > 1 && <label>Saved flows for current plan
           <select value={selected?.id || ""} onChange={e => {setSelectedId(e.target.value); setAcknowledged(false);}}>
-            {visible.map(f => <option key={f.id} value={f.id}>{f.prompt.slice(0,75)}</option>)}
+            {visible.map(f => <option key={f.id} value={f.id}>{f.repaired_from_run_id ? "[Repair proposal] " : ""}{f.prompt.slice(0,75)}</option>)}
           </select>
         </label>}
         {selected && <>
           <div className="browser-flow-head">
             <strong>Review: {selected.objective}</strong>
             <span className={"pill " + (selected.generation_mode==="model" ? "" : "neutral")}>
-              {selected.generation_mode==="model" ? "AI drafted" : "Fixture demo"}
+              {selected.repaired_from_run_id ? "Locator repair proposal" : selected.generation_mode==="model" ? "AI drafted" : "Fixture demo"}
             </span>
           </div>
           <p className="browser-flow-warning"><ShieldAlert size={15}/>{selected.warning}</p>
+          {selected.repaired_from_run_id && <p className="fine-print">
+            Repair lineage: derived from failed run {selected.repaired_from_run_id.slice(0,8)}.
+            The original assertions are unchanged and the replay is restricted to the same test target.
+          </p>}
           <ol className="typed-actions">
             {selected.steps.map((step,i) => <li key={i}>
               <span>{String(i+1).padStart(2,"0")}</span>
@@ -157,6 +215,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
           <div className="browser-execution-control">
             <label>Approved test origin
               <input value={target} onChange={e => {setTarget(e.target.value);setAcknowledged(false);}}
+                readOnly={!!selected.repaired_from_run_id}
                 placeholder="http://fixture:8081"/>
             </label>
             <label className="browser-acknowledge">
@@ -182,6 +241,37 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
             href={apiBase + "/api/runs/" + latestRun.id + "/screenshot"}>
             Inspect screenshot <ArrowRight size={15}/>
           </a>}
+          {suggestion && <div className="browser-repair-hint">
+            <strong><WandSparkles size={16}/> Possible locator change</strong>
+            <p>Step {suggestion.step_index+1}: the {suggestion.role} named
+              <b> “{suggestion.original_name}” </b>was not found. A visible candidate is
+              <b> “{suggestion.proposed_name}”</b> (similarity {Math.round(suggestion.confidence*100)}%).
+            </p>
+            <p>This is not proof of a regression fix. GQA will keep the original failure and all assertions.</p>
+            <button className="button secondary" disabled={repairing} onClick={proposeRepair}>
+              {repairing ? <Loader2 size={15} className="spin"/> : <FileCode2 size={15}/>}
+              {repairing ? "Creating proposal..." : "Create reviewable repair proposal"}
+            </button>
+          </div>}
+          {selected.repaired_from_run_id && latestRun.status === "passed" && <div className="browser-repair-confirm">
+            {acceptedReview ? <>
+              <strong><CheckCircle2 size={17}/> Verified locator lesson saved</strong>
+              <p>Revision {acceptedReview.app_revision} · Project memory record {acceptedReview.memory_id.slice(0,8)}</p>
+              <p>This lesson is version-scoped and will not silently rewrite other flows.</p>
+            </> : <>
+              <strong>Record this verified correction</strong>
+              <p>The repaired flow passed against the original failing target. Save it as a project lesson only if this is the expected application behavior.</p>
+              <label>Application version or commit ID
+                <input value={revision} onChange={e=>setRevision(e.target.value)}
+                  minLength={3} maxLength={80} placeholder="e.g. staging-commit-a1b2c3"/>
+              </label>
+              <button className="button secondary" disabled={accepting || !/^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$/.test(revision)}
+                onClick={acceptRepair}>
+                {accepting ? <Loader2 size={15} className="spin"/> : <CheckCircle2 size={15}/>}
+                {accepting ? "Recording lesson..." : "Confirm and save verified repair"}
+              </button>
+            </>}
+          </div>}
         </div>}
       </div>}
     </section>

@@ -22,3 +22,11 @@
 .browser-flow-result { margin-top: 18px; border-top: 1px solid #2b4055; padding-top: 18px; }
 .browser-flow-result .run-heading strong { display: flex; gap: 8px; align-items: center; }
 .browser-flow-error { display: flex; gap: 8px; margin-top: 13px; padding: 10px; font-size: 12px; color: #ffb4af; border-radius: 8px; background: #43262c; }
+
+.browser-repair-hint, .browser-repair-confirm { border: 1px solid #527075; border-radius: 11px; padding: 16px; margin-top: 16px; background: #19303a; }
+.browser-repair-hint strong,.browser-repair-confirm strong { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #b1efe4; }
+.browser-repair-hint p,.browser-repair-confirm p { color: #b8cfd5; font-size: 11px; line-height: 1.7; margin: 10px 0; }
+.browser-repair-hint b { color: #e1f3f0; }
+.browser-repair-hint .button,.browser-repair-confirm .button { margin-top: 10px; }
+.browser-repair-confirm label { margin: 13px 0 4px; }
+.browser-execution-control input[readonly] { opacity: .75; cursor: not-allowed; }
