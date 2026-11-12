@@ -135,3 +135,28 @@ test("worker cleanup failure blocks subsequent job launches",async t=>{
  assert.equal(scheduler.ready,false);
  assert.throws(()=>scheduler.enqueue(spec),/recovery incomplete/);
 });
+
+test("corrupted or widened durable queue cannot re-execute after restart", t=>{
+ const dir=temp(t);
+ const file=path.join(dir,"jobs.json");
+ const store=new JobStore(dir);store.load();
+ const queued=store.create(spec);
+ const tampered=(replacement)=>{
+   const data=JSON.parse(fs.readFileSync(file,"utf8"));
+   data[0].spec=replacement;
+   fs.writeFileSync(file,JSON.stringify(data));
+   assert.throws(()=>new JobStore(dir).load(),/Invalid broker journal/);
+ };
+ tampered({...spec,target_url:"http://api:8080"});
+ tampered({...spec,kind:"flow",steps:[{op:"navigate",path:"/"},{op:"eval",script:"evil"}]});
+ tampered({...spec,extra:"--privileged"});
+ assert.ok(queued.id);
+});
+test("only exact, bounded fixture job specs enter the journal",t=>{
+ const dir=temp(t),store=new JobStore(dir);store.load();
+ assert.throws(()=>store.create({...spec,target_url:"http://db:5432"}),/unapproved broker job/);
+ assert.throws(()=>store.create({...spec,extra:"hidden"}),/unapproved broker job/);
+ assert.throws(()=>store.create({...spec,run_api:false,run_web:false}),/unapproved broker job/);
+ const saved=store.create(spec);
+ assert.equal(saved.status,"queued");
+});
