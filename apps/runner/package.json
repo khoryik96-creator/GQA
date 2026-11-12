@@ -1,0 +1,7 @@
+{
+  "name": "gqa-readonly-smoke-runner",
+  "private": true,
+  "version": "0.2.0",
+  "scripts": { "test": "node --test" },
+  "dependencies": { "playwright": "1.64.1" }
+}
