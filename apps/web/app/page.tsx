@@ -17,12 +17,18 @@ type Project = {
   stack: string; created_at: string;
 };
 type Agent = { id: string; name: string; reason: string };
+type RepoSnapshot = { repository: string; default_branch: string; technologies: string[]; test_evidence: string[]; file_count: number; truncated: boolean; inspected_at: string };
+type MemoryReference = { id: string; kind: string; content: string; source: string };
 type Plan = {
   id: string; project_id: string; request_id: string; prompt: string;
   environment: Environment; selected_agents: Agent[]; warnings: string[];
   approval_required: boolean; execution_mode: string;
+  consulted_memories: MemoryReference[];
+  repository_evidence: RepoSnapshot;
   status: string; created_at: string;
 };
+type SmokeCheck = { name: string; status: string; duration_ms: number; detail: string };
+type TestRun = { id: string; project_id: string; plan_id: string; target_url: string; status: string; checks: SmokeCheck[]; screenshot_available: boolean; started_at: string; finished_at: string | null };
 type Memory = {
   id: string; project_id: string; kind: MemoryKind; content: string;
   source: string; status: string; supersedes_id: string; created_at: string;
@@ -66,6 +72,11 @@ export default function CommandCenter() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
+  const [inspection, setInspection] = useState<RepoSnapshot | null>(null);
+  const [runs, setRuns] = useState<TestRun[]>([]);
+  const [inspecting, setInspecting] = useState(false);
+  const [runningSmoke, setRunningSmoke] = useState(false);
+  const [smokeTarget, setSmokeTarget] = useState("http://fixture:8081");
   const [view, setView] = useState<"command" | "memory">("command");
   const [showCreate, setShowCreate] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -85,6 +96,7 @@ export default function CommandCenter() {
 
   const selected = useMemo(() => projects.find(p => p.id === selectedId), [projects, selectedId]);
   const latest = plans[0];
+  const latestRun = runs[0];
 
   useEffect(() => {
     call<Project[]>("/api/projects")
@@ -101,11 +113,17 @@ export default function CommandCenter() {
     let cancelled = false;
     setPlans([]);
     setMemories([]);
+    setRuns([]);
+    setInspection(null);
     Promise.all([
       call<Plan[]>("/api/projects/" + selectedId + "/plans"),
-      call<Memory[]>("/api/projects/" + selectedId + "/memories")
-    ]).then(([newPlans, newMemories]) => {
-      if (!cancelled) { setPlans(newPlans); setMemories(newMemories); }
+      call<Memory[]>("/api/projects/" + selectedId + "/memories"),
+      call<TestRun[]>("/api/projects/" + selectedId + "/runs")
+    ]).then(([newPlans, newMemories, newRuns]) => {
+      if (!cancelled) {
+        setPlans(newPlans); setMemories(newMemories); setRuns(newRuns);
+        if (newPlans[0]?.repository_evidence?.repository) setInspection(newPlans[0].repository_evidence);
+      }
     }).catch(err => { if (!cancelled) setError(err.message); });
     return () => { cancelled = true; };
   }, [selectedId]);
@@ -136,8 +154,33 @@ export default function CommandCenter() {
         method: "POST", body: JSON.stringify({ prompt, environment })
       });
       setPlans(list => [plan, ...list]);
+      if (plan.repository_evidence?.repository) setInspection(plan.repository_evidence);
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
+  }
+
+
+  async function inspectRepository() {
+    if (!selectedId) return;
+    setInspecting(true); setError("");
+    try {
+      const snapshot = await call<RepoSnapshot>("/api/projects/" + selectedId + "/inspection", { method: "POST" });
+      setInspection(snapshot);
+    } catch (err) { setError((err as Error).message); }
+    finally { setInspecting(false); }
+  }
+
+  async function executeSmoke(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedId || !latest) return;
+    setRunningSmoke(true); setError("");
+    try {
+      const result = await call<TestRun>("/api/projects/" + selectedId + "/runs", {
+        method: "POST", body: JSON.stringify({ plan_id: latest.id, target_url: smokeTarget })
+      });
+      setRuns(list => [result, ...list]);
+    } catch (err) { setError((err as Error).message); }
+    finally { setRunningSmoke(false); }
   }
 
   async function saveMemory(event: FormEvent<HTMLFormElement>) {
@@ -258,13 +301,52 @@ export default function CommandCenter() {
                       <div className="agent-grid">
                         {latest.selected_agents.map(a => { const Icon = icons[a.id] || BrainCircuit; return <div className="agent-card" key={a.id}><span className="agent-icon"><Icon size={20}/></span><div><strong>{a.name}</strong><p>{a.reason}</p></div><CheckCircle2 size={16} className="agent-check"/></div>; })}
                       </div>
-                      <div className="notice"><ShieldCheck size={17}/><div><strong>Execution is not enabled in v0.1.</strong><p>This is a saved, deterministic routing plan. No model was called and no automated test was executed.</p></div></div>
+                      <div className="notice"><ShieldCheck size={17}/><div><strong>Planning is memory-aware; execution stays separately controlled.</strong><p>Agent selection is deterministic, informed by repository evidence and confirmed project memories. This is not yet an LLM-generated QA strategy.</p></div></div>
+                      <div className="context-panel">
+                        <strong>Context used for this plan</strong>
+                        <p>{latest.repository_evidence?.repository ? "GitHub: " + latest.repository_evidence.repository + " · " + (latest.repository_evidence.technologies || []).join(", ") : "Repository inspection not available."}</p>
+                        <p>{latest.consulted_memories.length} confirmed project memory record(s) consulted.</p>
+                        {latest.consulted_memories.slice(0,4).map(m => <div key={m.id} className="memory-excerpt"><span>{m.kind}</span>{m.content}</div>)}
+                      </div>
                       {latest.warnings.filter(w => !w.startsWith("Planning only")).map(w => <div className="warning-line" key={w}><AlertTriangle size={15}/>{w}</div>)}
                     </section> : <section className="card placeholder-card"><Workflow size={28}/><h3>No QA plan yet</h3><p>Submit your first testing request to generate a project-specific agent selection plan.</p></section>}
+                    <section className="card">
+                      <div className="card-head"><div><h2><Activity size={18}/> Read-only smoke execution</h2><p>Real API and Playwright checks in a separate local Docker runner.</p></div><span className="pill neutral">v0.2</span></div>
+                      <form className="smoke-form" onSubmit={executeSmoke}>
+                        <label>Approved test target<input value={smokeTarget} onChange={e => setSmokeTarget(e.target.value)} placeholder="http://fixture:8081"/></label>
+                        <p className="fine-print">The built-in fixture works immediately. Other origins must be explicitly allowlisted in both Docker services. No write, load, or active security tests are permitted.</p>
+                        <button className="button primary" type="submit" disabled={!latest || latest.approval_required || runningSmoke || !latest.selected_agents.some(a => a.id === "api" || a.id === "web")}>
+                          {runningSmoke ? <Loader2 size={16} className="spin"/> : <Activity size={16}/>}
+                          {runningSmoke ? "Executing smoke checks..." : "Execute safe smoke checks"}
+                        </button>
+                      </form>
+                      {latestRun && <div className="run-result">
+                        <div className="run-heading"><strong>Latest run · {when(latestRun.started_at)}</strong><span className={"pill " + (latestRun.status === "passed" ? "" : "warning")}>{latestRun.status}</span></div>
+                        {latestRun.checks.map((check, index) => <div className="check-row" key={index}>
+                          {check.status === "passed" ? <CheckCircle2 size={16} className="check-pass"/> : <AlertTriangle size={16} className="check-fail"/>}
+                          <div><strong>{check.name}</strong><p>{check.detail} · {check.duration_ms}ms</p></div>
+                        </div>)}
+                        {latestRun.screenshot_available && <a className="text-button" href={API + "/api/runs/" + latestRun.id + "/screenshot"} target="_blank" rel="noreferrer">Open browser screenshot <ArrowRight size={15}/></a>}
+                      </div>}
+                    </section>
                   </div>
 
                   <div className="workspace-side">
-                    <section className="card side-card"><div className="card-head"><div><h2><Activity size={17}/> Project overview</h2></div></div><div className="stat-list"><div><span>QA plans</span><strong>{plans.length}</strong></div><div><span>Memories in view</span><strong>{memories.length}</strong></div><div><span>Executed tests</span><strong>0 <small>not connected</small></strong></div></div></section>
+                    <section className="card side-card">
+                      <div className="card-head"><div><h2><FileCode2 size={17}/> Repository intelligence</h2></div></div>
+                      <p className="small muted">{inspection?.repository || "Repository not yet inspected"}</p>
+                      {inspection && <>
+                        <p className="small">Branch: {inspection.default_branch} · {inspection.file_count} files</p>
+                        <p className="small muted">Stack: {inspection.technologies.length ? inspection.technologies.join(", ") : "Undetermined"}</p>
+                        <p className="small muted">Test evidence: {inspection.test_evidence.length ? inspection.test_evidence.join(", ") : "No known test conventions detected"}</p>
+                      </>}
+                      <button className="button secondary full-width" onClick={inspectRepository} disabled={inspecting}>
+                        {inspecting ? <Loader2 size={15} className="spin"/> : <Search size={15}/>}
+                        {inspecting ? "Inspecting..." : "Inspect public GitHub repository"}
+                      </button>
+                      <p className="fine-print">Public GitHub metadata only; private repository authentication will be added later.</p>
+                    </section>
+                    <section className="card side-card"><div className="card-head"><div><h2><Activity size={17}/> Project overview</h2></div></div><div className="stat-list"><div><span>QA plans</span><strong>{plans.length}</strong></div><div><span>Memories in view</span><strong>{memories.length}</strong></div><div><span>Smoke runs</span><strong>{runs.length}</strong></div></div></section>
                     <section className="card side-card"><div className="card-head"><div><h2><History size={17}/> Previous requests</h2></div></div>{plans.length === 0 ? <p className="muted small">Requests will appear here after you create a QA plan.</p> : <div className="history-list">{plans.slice(0,7).map(p => <div className="history-item" key={p.id}><span className="history-marker"/><div><p>{p.prompt}</p><small><Clock3 size={12}/>{when(p.created_at)} · {p.environment}</small></div></div>)}</div>}</section>
                     <section className="card side-card help-card"><ShieldCheck size={22}/><strong>Memory-first architecture</strong><p>Document requirements, corrections and lessons so future QA plans can use verified project context.</p><button className="text-button" onClick={() => setView("memory")}>Open project memory <ArrowRight size={15}/></button></section>
                   </div>
