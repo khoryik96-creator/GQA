@@ -94,3 +94,34 @@ GQA_LLM_SEND_PROJECT_CONTEXT=true
 **Privacy:** The opt-in is required because the model receives the request, selected agent descriptions, repository metadata and confirmed project-memory excerpts. Keep sensitive customer information out of project memory unless your provider, consent and data handling policies permit transmitting it. The application remains local-only and unauthenticated.
 
 The model is used only to **draft scenarios**. It cannot approve production testing, execute scripts, change agent permissions or claim that anything has passed. The action runner remains policy-controlled and restricted to its fixed smoke operations.
+
+## v0.4 — Reviewed natural-language browser flows
+
+1. Choose or create a QA plan with a **Web QA** agent.
+2. Open **Browser flows** and type a natural-language request.
+3. GQA drafts a **typed action sequence** (deterministic demo flow by default, optional model-assisted drafting when the v0.3 provider is configured).
+4. Review each path, locator, input and assertion. The UI requires explicit acknowledgement of the exact saved flow digest.
+5. Execute against the allowlisted fixture `http://fixture:8081` or an explicitly approved test origin.
+6. Inspect individual Playwright step results and the browser screenshot.
+
+Supported actions: navigate to a relative path, click a button/link by accessible name,
+fill a labeled non-secret test field, assert visible text, assert an accessible element,
+and assert the URL path. **No model-generated JavaScript is evaluated.**
+
+The local fixture supports prompts such as "Open the homepage, click Show details and verify
+the detail panel is visible" or "Fill email and preview it." Without a model provider,
+these **demonstration flows are fixture-specific**, not inferred journeys in
+arbitrary external apps. A configured model can draft typed actions but cannot
+verify DOM locators it has not observed.
+
+To target an authorized staging site, add its **exact origin** to `GQA_SMOKE_TARGETS`
+in **both** the API and runner environments. The runner blocks cross-origin requests
+and non-GET browser traffic. This local-only demo is not an enterprise sandbox; do not
+expose it publicly or run it against untrusted targets. Production and high-impact
+plans remain disabled.
+
+### Roadmap after v0.4
+
+- v0.5: isolated ephemeral runners, versioned cache, evidence-first self-healing,
+  flaky-test classification and authenticated project permissions.
+- v0.6: optional semantic/visual assertions, multiple-model arbitration and budgets.

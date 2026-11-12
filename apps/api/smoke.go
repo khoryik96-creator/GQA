@@ -29,6 +29,8 @@ type TestRun struct{
   ID string `json:"id"`
   ProjectID string `json:"project_id"`
   PlanID string `json:"plan_id"`
+  FlowID string `json:"flow_id,omitempty"`
+  ExecutionKind string `json:"execution_kind"`
   TargetURL string `json:"target_url"`
   Status string `json:"status"`
   Checks []SmokeCheck `json:"checks"`
@@ -67,14 +69,15 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   if r.Method==http.MethodGet {
     rows,err:=s.db.Query(r.Context(),`
       SELECT id::text,project_id::text,plan_id::text,target_url,status,checks,started_at,finished_at,
-      screenshot_available FROM test_runs WHERE project_id=$1::uuid ORDER BY started_at DESC LIMIT 30`,id)
+      screenshot_available,COALESCE(flow_id::text,''),execution_kind
+      FROM test_runs WHERE project_id=$1::uuid ORDER BY started_at DESC LIMIT 30`,id)
     if err!=nil{fail(w,500,"Unable to retrieve runs");return}
     defer rows.Close()
     runs:=[]TestRun{}
     for rows.Next(){
       var run TestRun
       var raw []byte
-      if err:=rows.Scan(&run.ID,&run.ProjectID,&run.PlanID,&run.TargetURL,&run.Status,&raw,&run.StartedAt,&run.FinishedAt,&run.ScreenshotAvailable);err!=nil{
+      if err:=rows.Scan(&run.ID,&run.ProjectID,&run.PlanID,&run.TargetURL,&run.Status,&raw,&run.StartedAt,&run.FinishedAt,&run.ScreenshotAvailable,&run.FlowID,&run.ExecutionKind);err!=nil{
         fail(w,500,"Unable to read runs");return
       }
       if err:=json.Unmarshal(raw,&run.Checks);err!=nil{fail(w,500,"Invalid run evidence");return}
@@ -127,6 +130,7 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
     VALUES ($1::uuid,$2::uuid,$3,'running') RETURNING id::text,started_at`,id,input.PlanID,target).Scan(&run.ID,&run.StartedAt)
   if err!=nil{fail(w,500,"Unable to initialize run");return}
   run.Status="running"
+  run.ExecutionKind="smoke"
 
   body,_:=json.Marshal(map[string]any{"target_url":target,"run_api":runAPI,"run_web":runWeb})
   runnerURL:=os.Getenv("GQA_RUNNER_URL")

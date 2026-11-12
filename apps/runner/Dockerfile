@@ -4,6 +4,7 @@ COPY package.json ./
 RUN npm install --no-audit --no-fund
 COPY index.cjs ./index.cjs
 COPY policy.cjs ./policy.cjs
+COPY browser-flow.cjs ./browser-flow.cjs
 USER pwuser
 ENV PORT=8090
 EXPOSE 8090

@@ -66,3 +66,19 @@ CREATE INDEX IF NOT EXISTS test_runs_project_started ON test_runs(project_id,sta
 
 -- Structured plan proposals are never marked as executed tests.
 ALTER TABLE plans ADD COLUMN IF NOT EXISTS test_spec JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE TABLE IF NOT EXISTS browser_flows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  plan_id UUID NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  prompt TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  steps JSONB NOT NULL,
+  digest CHAR(64) NOT NULL,
+  generation_mode TEXT NOT NULL CHECK (generation_mode IN ('rules','model')),
+  warning TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS browser_flows_project_created ON browser_flows(project_id,created_at DESC);
+ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS flow_id UUID REFERENCES browser_flows(id);
+ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS execution_kind TEXT NOT NULL DEFAULT 'smoke';

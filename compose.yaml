@@ -20,6 +20,7 @@ services:
       PORT: "8080"
       ALLOWED_ORIGIN: http://localhost:3000
       GQA_RUNNER_URL: http://runner:8090/run
+      GQA_RUNNER_FLOW_URL: http://runner:8090/flow
       GQA_RUNNER_TOKEN: gqa_local_dev_runner_token_only
       GQA_SMOKE_TARGETS: http://fixture:8081
       GQA_EVIDENCE_DIR: /evidence
