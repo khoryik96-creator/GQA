@@ -30,6 +30,7 @@ To run the backend tests without Docker:
 
 ```bash
 cd apps/api
+go mod tidy
 go test ./...
 ```
 
