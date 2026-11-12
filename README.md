@@ -223,3 +223,48 @@ Chromium's own sandbox is disabled in this early worker and a compromised
 browser process could still reach other containers on the private test network.
 Untrusted websites, customer data, public hosting, multi-admin RBAC and
 commercial deployment remain unsupported.
+
+
+## v0.7 — One-shot test processes and redacted failure intelligence
+
+GQA now starts a **fresh Node.js child process for each approved API smoke
+or browser-flow execution**. The authenticated Go API sends the authorized
+request to the long-lived supervisor; the supervisor launches one job process,
+waits for the result, terminates timed-out jobs and records a distinct job ID.
+
+The worker child receives an explicitly restricted environment. API keys,
+database URLs, administrator credentials and the supervisor's runner
+authentication token are not passed into the subprocess. The parent runner
+still has the per-container CPU, memory, PID and network limits introduced
+in v0.6.
+
+**Important:** short-lived processes are **not** disposable containers or VMs.
+They share the worker container's filesystem, kernel, UID and network
+namespace. Chromium itself still uses the no-sandbox option. This release
+does not authorize testing untrusted websites, external customers, or
+public deployments.
+
+### Diagnosing failures
+
+The test-run history includes a sanitized diagnostic summary:
+
+- Execution mode and unique run-job identifier
+- Failure category (for example, assertion mismatch or possible locator rename)
+- Which typed browser step failed
+- The last safe URL path, without query parameters
+- Counts of browser console errors, uncaught page exceptions,
+  failed same-origin requests and HTTP 5xx responses
+- Existing step-by-step results, screenshots and repair provenance
+
+Raw console messages, network bodies, headers, cookies, credentials,
+request query strings, and arbitrary JavaScript traces are **not**
+persisted in diagnostic fields. These aggregate signals support
+investigation, but are not independently verified root-cause conclusions.
+
+The supplied Docker integration suite verifies fresh job identifiers
+across separate tests, the failure category for a deliberately renamed
+button, and the success of a reviewed replay.
+
+**Not implemented yet:** disposable per-test VM/container orchestration,
+multi-user project permissions, semantic visual analysis, durable job queues,
+browser sandboxing and production-grade evidence retention policies.
