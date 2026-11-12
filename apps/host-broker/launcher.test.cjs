@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {containerArgs,safeProjectName,validateResult,executeJob,FIXTURES,IMAGE}=require("./launcher.cjs");
+const {containerArgs,safeProjectName,dockerClientEnv,validateResult,executeJob,FIXTURES,IMAGE}=require("./launcher.cjs");
 const {allowedTarget}=require("../runner/policy.cjs");
 const {validateFlow}=require("../runner/browser-flow.cjs");
 
@@ -89,4 +89,14 @@ test("cross-origin targets and arbitrary Playwright scripts remain rejected",()=
  assert.equal(validateFlow([
   {op:"navigate",path:"/"},{op:"eval",text:"arbitrary script"}
  ]),false);
+});
+
+test("Docker CLI only receives operational environment",()=>{
+ const env=dockerClientEnv({PATH:"/bin",HOME:"/home/user",
+   GQA_RUNNER_TOKEN:"secret",GQA_ADMIN_PASSWORD:"secret",DATABASE_URL:"secret"});
+ assert.equal(env.PATH,"/bin");
+ assert.equal(env.HOME,"/home/user");
+ assert.equal(env.GQA_RUNNER_TOKEN,undefined);
+ assert.equal(env.GQA_ADMIN_PASSWORD,undefined);
+ assert.equal(env.DATABASE_URL,undefined);
 });

@@ -7,6 +7,16 @@ const { promisify } = require("node:util");
 const exec = promisify(execFile);
 const FIXTURES="http://fixture:8081,http://fixture-renamed:8081";
 const IMAGE="gqa-job:local";
+function dockerClientEnv(env) {
+  // Do not inherit GQA application credentials in the host Docker subprocess.
+  const keys=["PATH","HOME","USERPROFILE","APPDATA","LOCALAPPDATA",
+    "DOCKER_HOST","DOCKER_CONTEXT","DOCKER_CONFIG","DOCKER_CERT_PATH",
+    "DOCKER_TLS_VERIFY","SystemRoot","TEMP","TMP"];
+  const copy={};
+  for (const key of keys) if (typeof env[key]==="string") copy[key]=env[key];
+  return copy;
+}
+
 
 function safeProjectName(value) {
   return /^[a-z][a-z0-9_-]{0,32}$/.test(value);
@@ -54,7 +64,7 @@ async function executeJob(job,{project="gqa",run=exec,timeoutMs=55000}={}) {
   try {
     const args=containerArgs(job,name,project);
     const answer=await run("docker",args,{timeout:timeoutMs,maxBuffer:2200000,
-      windowsHide:true,killSignal:"SIGKILL",env:process.env});
+      windowsHide:true,killSignal:"SIGKILL",env:dockerClientEnv(process.env)});
     const output=answer.stdout.trim();
     if (output.length>1950000 || output.includes("\n")) return failure("invalid_worker_result",id);
     result=validateResult(JSON.parse(output),id);
@@ -64,8 +74,8 @@ async function executeJob(job,{project="gqa",run=exec,timeoutMs=55000}={}) {
     // The CLI may have timed out while its container continued. Make a
     // second best-effort cleanup attempt by exact generated container name.
     await run("docker",["rm","-f",name],{timeout:8000,maxBuffer:20000,
-      windowsHide:true,env:process.env}).catch(()=>{});
+      windowsHide:true,env:dockerClientEnv(process.env)}).catch(()=>{});
   }
   return result;
 }
-module.exports={FIXTURES,IMAGE,safeProjectName,containerArgs,failure,validateResult,executeJob};
+module.exports={FIXTURES,IMAGE,safeProjectName,dockerClientEnv,containerArgs,failure,validateResult,executeJob};
