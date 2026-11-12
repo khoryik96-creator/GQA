@@ -9,14 +9,18 @@ import {
 } from "lucide-react";
 import ScenarioReview, { type TestSpecification } from "../components/ScenarioReview";
 import BrowserFlowStudio from "../components/BrowserFlowStudio";
+import TeamAccess from "../components/TeamAccess";
 
 type AppType = "fullstack" | "web" | "api" | "backend" | "mobile";
 type Environment = "local" | "staging" | "production";
 type MemoryKind = "architecture" | "requirement" | "correction" | "lesson" | "preference";
 
+type AccessRole = "admin" | "owner" | "qa" | "reviewer" | "viewer";
+type Account = { id:string;email:string;global_role:"admin" | "member" };
+type AuthResponse = {authenticated:boolean;expires_at:string;user:Account};
 type Project = {
   id: string; name: string; repo_url: string; app_type: AppType;
-  stack: string; created_at: string;
+  stack: string; created_at: string; my_role:AccessRole;
 };
 type Agent = { id: string; name: string; reason: string };
 type RepoSnapshot = { repository: string; default_branch: string; technologies: string[]; test_evidence: string[]; file_count: number; truncated: boolean; inspected_at: string };
@@ -74,6 +78,8 @@ function when(iso: string) {
 export default function CommandCenter() {
   const [authStatus, setAuthStatus] = useState<"checking" | "anonymous" | "authenticated">("checking");
   const [password, setPassword] = useState("");
+  const [loginEmail, setLoginEmail] = useState("admin@gqa.local");
+  const [account, setAccount] = useState<Account | null>(null);
   const [loginError, setLoginError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -85,7 +91,7 @@ export default function CommandCenter() {
   const [inspecting, setInspecting] = useState(false);
   const [runningSmoke, setRunningSmoke] = useState(false);
   const [smokeTarget, setSmokeTarget] = useState("http://fixture:8081");
-  const [view, setView] = useState<"command" | "memory">("command");
+  const [view, setView] = useState<"command" | "memory" | "team">("command");
   const [showCreate, setShowCreate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingMemory, setSavingMemory] = useState(false);
@@ -105,11 +111,24 @@ export default function CommandCenter() {
   const selected = useMemo(() => projects.find(p => p.id === selectedId), [projects, selectedId]);
   const latest = plans[0];
   const latestRun = runs[0];
+  const isAdmin=account?.global_role==="admin";
+  const projectRole=selected?.my_role;
+  const canQA=projectRole==="admin"||projectRole==="owner"||projectRole==="qa";
+  const canReview=projectRole==="admin"||projectRole==="owner"||projectRole==="reviewer";
+  const canManage=projectRole==="admin"||projectRole==="owner";
 
   useEffect(() => {
     let cancelled = false;
     fetch(API + "/api/auth/session", { credentials: "include", cache: "no-store" })
-      .then(response => { if (!cancelled) setAuthStatus(response.ok ? "authenticated" : "anonymous"); })
+      .then(async response => {
+        if (!response.ok) return null;
+        return response.json() as Promise<AuthResponse>;
+      }).then(data => {
+        if (!cancelled) {
+          setAccount(data?.user||null);
+          setAuthStatus(data?.user ? "authenticated" : "anonymous");
+        }
+      })
       .catch(() => { if (!cancelled) setAuthStatus("anonymous"); });
     return () => { cancelled = true; };
   }, []);
@@ -159,13 +178,14 @@ export default function CommandCenter() {
       const response = await fetch(API + "/api/auth/login", {
         method: "POST", credentials: "include", cache: "no-store",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ email: loginEmail, password })
       });
       if (!response.ok) {
         const error = await response.json().catch(() => ({error:"Login unavailable"}));
         throw new Error(error.error || "Unable to log in");
       }
-      setPassword("");
+      const data=await response.json() as AuthResponse;
+      setPassword("");setAccount(data.user);
       setAuthStatus("authenticated");
     } catch (err) { setLoginError((err as Error).message); }
     finally { setAuthBusy(false); }
@@ -180,13 +200,14 @@ export default function CommandCenter() {
       });
       if (!response.ok) throw new Error("Unable to revoke session");
       setProjects([]); setSelectedId(null); setPlans([]); setMemories([]); setRuns([]);
-      setAuthStatus("anonymous"); setPassword("");
+      setAuthStatus("anonymous"); setPassword("");setAccount(null);
     } catch (err) { setError((err as Error).message); }
     finally { setAuthBusy(false); }
   }
 
   async function createProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if(!isAdmin)return;
     setBusy(true); setError("");
     try {
       const created = await call<Project>("/api/projects", {
@@ -204,7 +225,7 @@ export default function CommandCenter() {
 
   async function createPlan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedId) return;
+    if (!selectedId || !canQA) return;
     setBusy(true); setError("");
     try {
       const plan = await call<Plan>("/api/projects/" + selectedId + "/plans", {
@@ -218,7 +239,7 @@ export default function CommandCenter() {
 
 
   async function inspectRepository() {
-    if (!selectedId) return;
+    if (!selectedId || !canQA) return;
     setInspecting(true); setError("");
     try {
       const snapshot = await call<RepoSnapshot>("/api/projects/" + selectedId + "/inspection", { method: "POST" });
@@ -229,7 +250,7 @@ export default function CommandCenter() {
 
   async function executeSmoke(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedId || !latest) return;
+    if (!selectedId || !latest || !canQA) return;
     setRunningSmoke(true); setError("");
     try {
       const result = await call<TestRun>("/api/projects/" + selectedId + "/runs", {
@@ -242,7 +263,7 @@ export default function CommandCenter() {
 
   async function saveMemory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedId) return;
+    if (!selectedId || !canQA) return;
     setSavingMemory(true); setError("");
     try {
       const memory = await call<Memory>("/api/projects/" + selectedId + "/memories", {
@@ -269,6 +290,7 @@ export default function CommandCenter() {
   }
 
   function correctMemory(memory: Memory) {
+    if (!canQA) return;
     setSupersedesId(memory.id);
     setMemoryKind("correction");
     setMemoryText(memory.content);
@@ -280,16 +302,21 @@ export default function CommandCenter() {
     return <main className="login-screen">
       <div className="login-panel">
         <div className="login-symbol"><BrainCircuit size={31}/></div>
-        <div className="eyebrow"><LockKeyhole size={14}/> GQA LOCAL ADMINISTRATOR</div>
+        <div className="eyebrow"><LockKeyhole size={14}/> GQA ACCOUNT ACCESS</div>
         <h1>{authStatus === "checking" ? "Checking session" : "Sign in to GQA"}</h1>
         <p>{authStatus === "checking"
           ? "Verifying your authenticated workspace..."
-          : "Access project memory, previous QA sessions and controlled test execution."}</p>
+          : "Access the projects and QA activities permitted for your account."}</p>
         {authStatus === "anonymous" && <form onSubmit={signIn}>
-          <label>Administrator password
+          <label>Account email
+            <input type="email" required autoComplete="username"
+              maxLength={254} value={loginEmail} onChange={e=>setLoginEmail(e.target.value)}
+              placeholder="admin@gqa.local"/>
+          </label>
+          <label>Password
             <input type="password" autoComplete="current-password" required
-              value={password} maxLength={256} onChange={e => setPassword(e.target.value)}
-              placeholder="Password configured in your local .env"/>
+              value={password} maxLength={72} onChange={e => setPassword(e.target.value)}
+              placeholder="Your assigned account password"/>
           </label>
           {loginError && <div className="browser-flow-error"><AlertTriangle size={15}/>{loginError}</div>}
           <button className="button primary full-width" type="submit" disabled={authBusy || !password}>
@@ -297,7 +324,7 @@ export default function CommandCenter() {
             {authBusy ? "Signing in..." : "Sign in"}
           </button>
         </form>}
-        <p className="fine-print">Local prototype only. No cloud accounts or multi-user permissions are enabled.</p>
+        <p className="fine-print">Local prototype with project-level roles. Accounts are provisioned by administrators, not through self-registration.</p>
       </div>
     </main>;
   }
@@ -310,7 +337,7 @@ export default function CommandCenter() {
           <div><strong>GQA</strong><small>Principal QA Platform</small></div>
         </div>
         <div className="sidebar-section">
-          <div className="section-title"><span>PROJECTS</span><button className="icon-btn" title="Create project" onClick={() => setShowCreate(true)}><Plus size={16}/></button></div>
+          <div className="section-title"><span>PROJECTS</span>{isAdmin&&<button className="icon-btn" title="Create project" onClick={() => setShowCreate(true)}><Plus size={16}/></button>}</div>
           {projects.map(p => (
             <button key={p.id} className={"project-item " + (selectedId === p.id ? "active" : "")} onClick={() => { setSelectedId(p.id); setView("command"); setError(""); }}>
               <Layers3 size={16}/><span>{p.name}</span>
@@ -321,8 +348,8 @@ export default function CommandCenter() {
           {loadingProjects && <span className="muted small">Loading projects…</span>}
         </div>
         <div className="sidebar-footer">
-          <div className="status-dot"/><span>Foundation v0.1</span>
-          <small>Local prototype · Planning only</small>
+          <div className="status-dot"/><span>GQA v0.8</span>
+          <small>{account?.email} · {account?.global_role}</small>
         </div>
       </aside>
 
@@ -330,7 +357,7 @@ export default function CommandCenter() {
         <header className="topbar">
           <div className="breadcrumb"><FolderKanban size={17}/><span>Workspace</span><span className="slash">/</span><strong>{selected?.name || "Overview"}</strong></div>
           <div className="topbar-actions">
-            <span className="preview-label"><span className="status-dot"/> LOCAL DEVELOPMENT</span>
+            <span className="preview-label"><span className="status-dot"/> {account?.email||"Local development"}</span>
             <button className="button secondary" type="button" onClick={signOut} disabled={authBusy}>
               <LogOut size={15}/> Sign out
             </button>
@@ -340,7 +367,7 @@ export default function CommandCenter() {
         <div className="content">
           {error && <div className="error-banner"><AlertTriangle size={17}/><span>{error}</span><button onClick={() => setError("")} title="Dismiss"><X size={16}/></button></div>}
 
-          {showCreate && (
+          {showCreate && isAdmin && (
             <section className="card modal-card">
               <div className="card-head"><div><h2>Create project</h2><p>Connect a GitHub repository and establish its project context.</p></div><button className="icon-btn" onClick={() => setShowCreate(false)} title="Close"><X size={18}/></button></div>
               <form onSubmit={createProject} className="form-grid">
@@ -358,29 +385,34 @@ export default function CommandCenter() {
               <span className="empty-symbol"><BrainCircuit size={36}/></span>
               <h1>Build a smarter QA workflow.</h1>
               <p>Connect your first software project to create testing plans, retain engineering knowledge, and coordinate specialist QA agents.</p>
-              <button className="button primary" onClick={() => setShowCreate(true)}><Plus size={17}/> Create your first project</button>
+              {isAdmin?<button className="button primary" onClick={() => setShowCreate(true)}><Plus size={17}/> Create your first project</button>:
+              <p className="muted small">Ask a project owner or administrator to assign your account to a project.</p>}
             </section>
           ) : (
             <>
               <div className="page-intro">
                 <div><div className="eyebrow"><Sparkles size={14}/> PROJECT INTELLIGENCE</div><h1>{selected.name}</h1><p>Plan intelligent testing with persistent project memory and specialist agent selection.</p></div>
-                <div className="project-chip"><GitBranch size={16}/><span>{labels[selected.app_type]}</span></div>
+                <div className="project-chip"><GitBranch size={16}/><span>{labels[selected.app_type]} · {projectRole}</span></div>
               </div>
               <div className="repo-strip"><GitBranch size={16}/><a href={selected.repo_url} target="_blank" rel="noreferrer">{selected.repo_url}</a><span className="subtle-divider"/> <span>{selected.stack || "Stack not recorded"}</span></div>
 
               <div className="tabs">
                 <button className={view === "command" ? "current" : ""} onClick={() => setView("command")}><BrainCircuit size={17}/> QA Command</button>
                 <button className={view === "memory" ? "current" : ""} onClick={() => setView("memory")}><Database size={17}/> Project Memory <span className="mini-count">{memories.length}</span></button>
+                {canManage&&<button className={view==="team"?"current":""} onClick={()=>setView("team")}><ShieldCheck size={17}/> Team Access</button>}
               </div>
 
-              {view === "command" ? (
+              {view === "team" && canManage && account ? (
+                <TeamAccess key={selected.id} projectId={selected.id} apiBase={API}
+                  isAdmin={!!isAdmin} selfUserId={account.id}/>
+              ) : view === "command" ? (
                 <div className="workspace-grid">
                   <div className="workspace-main">
                     <section className="card prompt-card">
                       <div className="card-head"><div><h2><Sparkles size={18}/> Ask your Principal QA Engineer</h2><p>Describe what you want tested. GQA will propose the right specialist team.</p></div><span className="pill">Plan mode</span></div>
                       <form onSubmit={createPlan}>
-                        <textarea value={prompt} onChange={e => setPrompt(e.target.value)} minLength={10} maxLength={10000} rows={6} placeholder="Describe the workflows, risks, tests or issues to investigate..." required/>
-                        <div className="prompt-actions"><label>Target <select value={environment} onChange={e => setEnvironment(e.target.value as Environment)}><option value="local">Local</option><option value="staging">Staging</option><option value="production">Production (approval required)</option></select></label><button className="button primary" type="submit" disabled={busy}>{busy ? <Loader2 size={16} className="spin"/> : <Send size={16}/>} Generate QA plan</button></div>
+                        <textarea value={prompt} onChange={e => setPrompt(e.target.value)} minLength={10} maxLength={10000} rows={6} disabled={!canQA} placeholder="Describe the workflows, risks, tests or issues to investigate..." required/>
+                        <div className="prompt-actions"><label>Target <select value={environment} onChange={e => setEnvironment(e.target.value as Environment)}><option value="local">Local</option><option value="staging">Staging</option><option value="production">Production (approval required)</option></select></label><button className="button primary" type="submit" disabled={busy || !canQA}>{busy ? <Loader2 size={16} className="spin"/> : <Send size={16}/>} Generate QA plan</button></div>
                       </form>
                     </section>
 
@@ -404,7 +436,9 @@ export default function CommandCenter() {
                       projectId={selectedId!}
                       planId={latest?.id}
                       hasWeb={!!latest?.selected_agents.some(a => a.id === "web")}
-                      canRun={!!latest && !latest.approval_required && latest.environment !== "production" &&
+                      canDraft={canQA}
+                      canReview={canReview}
+                      canRun={canQA && !!latest && !latest.approval_required && latest.environment !== "production" &&
                         latest.selected_agents.some(a => a.id === "web")}
                       apiBase={API}
                     />
@@ -413,7 +447,7 @@ export default function CommandCenter() {
                       <form className="smoke-form" onSubmit={executeSmoke}>
                         <label>Approved test target<input value={smokeTarget} onChange={e => setSmokeTarget(e.target.value)} placeholder="http://fixture:8081"/></label>
                         <p className="fine-print">The built-in fixture works immediately. Other origins must be explicitly allowlisted in both Docker services. No write, load, or active security tests are permitted.</p>
-                        <button className="button primary" type="submit" disabled={!latest || latest.approval_required || runningSmoke || !latest.selected_agents.some(a => a.id === "api" || a.id === "web")}>
+                        <button className="button primary" type="submit" disabled={!canQA || !latest || latest.approval_required || runningSmoke || !latest.selected_agents.some(a => a.id === "api" || a.id === "web")}>
                           {runningSmoke ? <Loader2 size={16} className="spin"/> : <Activity size={16}/>}
                           {runningSmoke ? "Executing smoke checks..." : "Execute safe smoke checks"}
                         </button>
@@ -442,7 +476,7 @@ export default function CommandCenter() {
                         <p className="small muted">Stack: {inspection.technologies.length ? inspection.technologies.join(", ") : "Undetermined"}</p>
                         <p className="small muted">Test evidence: {inspection.test_evidence.length ? inspection.test_evidence.join(", ") : "No known test conventions detected"}</p>
                       </>}
-                      <button className="button secondary full-width" onClick={inspectRepository} disabled={inspecting}>
+                      <button className="button secondary full-width" onClick={inspectRepository} disabled={inspecting || !canQA}>
                         {inspecting ? <Loader2 size={15} className="spin"/> : <Search size={15}/>}
                         {inspecting ? "Inspecting..." : "Inspect public GitHub repository"}
                       </button>
@@ -460,18 +494,18 @@ export default function CommandCenter() {
                     <form onSubmit={searchMemories} className="search-row"><Search size={17}/><input placeholder="Search remembered knowledge..." value={memorySearch} onChange={e => setMemorySearch(e.target.value)}/><button className="button secondary" type="submit">Search</button></form>
                     <div className="memory-list">
                       {memories.length === 0 && <div className="memory-empty">No memory records found. Add the first project fact or correction.</div>}
-                      {memories.map(m => <div className={"memory-item " + (m.status === "superseded" ? "superseded" : "")} key={m.id}><div className="memory-meta"><span className="pill neutral">{m.kind}</span><span>{when(m.created_at)}</span><span className={m.status === "confirmed" ? "memory-confirmed" : "memory-obsolete"}>{m.status}</span></div><p>{m.content}</p><div className="memory-actions"><span>Source: {m.source}</span>{m.status === "confirmed" && <button className="text-button" onClick={() => correctMemory(m)}>Correct / supersede <ArrowRight size={13}/></button>}</div></div>)}
+                      {memories.map(m => <div className={"memory-item " + (m.status === "superseded" ? "superseded" : "")} key={m.id}><div className="memory-meta"><span className="pill neutral">{m.kind}</span><span>{when(m.created_at)}</span><span className={m.status === "confirmed" ? "memory-confirmed" : "memory-obsolete"}>{m.status}</span></div><p>{m.content}</p><div className="memory-actions"><span>Source: {m.source}</span>{m.status === "confirmed" && canQA && <button className="text-button" onClick={() => correctMemory(m)}>Correct / supersede <ArrowRight size={13}/></button>}</div></div>)}
                     </div>
                   </section>
-                  <section className="card memory-editor"><div className="card-head"><div><h2><Plus size={18}/> {supersedesId ? "Correct existing memory" : "Add project knowledge"}</h2><p>Human-confirmed knowledge is stored with provenance.</p></div></div>
+                  {canQA && <section className="card memory-editor"><div className="card-head"><div><h2><Plus size={18}/> {supersedesId ? "Correct existing memory" : "Add project knowledge"}</h2><p>Human-confirmed knowledge is stored with provenance.</p></div></div>
                     <form onSubmit={saveMemory}>
                       <label>Category<select value={memoryKind} onChange={e => setMemoryKind(e.target.value as MemoryKind)}>{kinds.map(kind => <option key={kind} value={kind}>{kind[0].toUpperCase() + kind.slice(1)}</option>)}</select></label>
                       {supersedesId && <div className="notice"><History size={16}/><span>New record supersedes the selected memory, preserving its history.</span><button type="button" className="icon-btn" onClick={() => { setSupersedesId(""); setMemoryText(""); }} title="Cancel correction"><X size={15}/></button></div>}
                       <label>Knowledge<textarea rows={6} required minLength={3} maxLength={10000} value={memoryText} onChange={e => setMemoryText(e.target.value)} placeholder="Enter an architectural fact, testing requirement, correction, or lesson learned..."/></label>
                       <button className="button primary full-width" disabled={savingMemory} type="submit">{savingMemory ? "Saving..." : "Save project memory"} <ArrowRight size={16}/></button>
                     </form>
-                    <p className="fine-print">Do not store secrets, production credentials or personal data here. This local MVP has no user authentication.</p>
-                  </section>
+                    <p className="fine-print">Do not store secrets, production credentials or personal data here. Changes are attributed to project members.</p>
+                  </section>}
                 </div>
               )}
             </>

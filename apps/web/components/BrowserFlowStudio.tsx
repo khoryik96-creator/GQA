@@ -41,6 +41,8 @@ type Props = {
   projectId: string;
   planId?: string;
   canRun: boolean;
+  canDraft: boolean;
+  canReview: boolean;
   hasWeb: boolean;
   apiBase: string;
 };
@@ -70,7 +72,7 @@ async function requestJSON<T>(api: string, path: string, init?: RequestInit): Pr
   return resp.json() as Promise<T>;
 }
 
-export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, apiBase }: Props) {
+export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft, canReview, hasWeb, apiBase }: Props) {
   const [prompt, setPrompt] = useState("Open the homepage, click Show details and verify the detail panel is visible.");
   const [target, setTarget] = useState("http://fixture:8081");
   const [flows, setFlows] = useState<BrowserFlow[]>([]);
@@ -108,7 +110,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
 
   async function draftFlow(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!planId) return;
+    if (!planId || !canDraft) return;
     setDrafting(true); setError(""); setAcknowledged(false);
     try {
       const draft = await requestJSON<BrowserFlow>(apiBase, "/api/projects/" + projectId + "/flows", {
@@ -138,7 +140,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
 
 
   async function proposeRepair() {
-    if (!selected || !latestRun || !suggestion) return;
+    if (!selected || !latestRun || !suggestion || !canDraft) return;
     setRepairing(true); setError(""); setAcknowledged(false);
     try {
       const draft = await requestJSON<BrowserFlow>(
@@ -156,7 +158,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
 
   async function acceptRepair() {
     if (!selected?.repaired_from_run_id || !latestRun || latestRun.status !== "passed" ||
-        !revision.trim() || acceptedReview) return;
+        !revision.trim() || acceptedReview || !canReview) return;
     setAccepting(true); setError("");
     try {
       const review = await requestJSON<RepairReview>(
@@ -188,7 +190,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
           <textarea value={prompt} onChange={e => setPrompt(e.target.value)} minLength={10} maxLength={2000} rows={3}
             placeholder="Open the app, click Show details, and verify that details are displayed."/>
         </label>
-        <button className="button secondary" type="submit" disabled={!planId || !hasWeb || drafting}>
+        <button className="button secondary" type="submit" disabled={!canDraft || !planId || !hasWeb || drafting}>
           {drafting ? <Loader2 size={16} className="spin"/> : <FileCode2 size={16}/>}
           {drafting ? "Drafting steps..." : "Draft browser flow"}
         </button>
@@ -264,7 +266,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
             href={apiBase + "/api/runs/" + latestRun.id + "/screenshot"}>
             Inspect screenshot <ArrowRight size={15}/>
           </a>}
-          {suggestion && <div className="browser-repair-hint">
+          {suggestion && canDraft && <div className="browser-repair-hint">
             <strong><WandSparkles size={16}/> Possible locator change</strong>
             <p>Step {suggestion.step_index+1}: the {suggestion.role} named
               <b> “{suggestion.original_name}” </b>was not found. A visible candidate is
@@ -276,7 +278,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
               {repairing ? "Creating proposal..." : "Create reviewable repair proposal"}
             </button>
           </div>}
-          {selected.repaired_from_run_id && latestRun.status === "passed" && <div className="browser-repair-confirm">
+          {selected.repaired_from_run_id && latestRun.status === "passed" && canReview && <div className="browser-repair-confirm">
             {acceptedReview ? <>
               <strong><CheckCircle2 size={17}/> Verified locator lesson saved</strong>
               <p>Revision {acceptedReview.app_revision} · Project memory record {acceptedReview.memory_id.slice(0,8)}</p>
