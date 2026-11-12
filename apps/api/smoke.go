@@ -20,6 +20,7 @@ import (
 )
 
 type SmokeCheck struct{
+  Repair *RepairHint `json:"repair,omitempty"`
   Name string `json:"name"`
   Status string `json:"status"`
   DurationMS int64 `json:"duration_ms"`

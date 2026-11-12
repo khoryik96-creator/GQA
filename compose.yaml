@@ -22,7 +22,7 @@ services:
       GQA_RUNNER_URL: http://runner:8090/run
       GQA_RUNNER_FLOW_URL: http://runner:8090/flow
       GQA_RUNNER_TOKEN: gqa_local_dev_runner_token_only
-      GQA_SMOKE_TARGETS: http://fixture:8081
+      GQA_SMOKE_TARGETS: http://fixture:8081,http://fixture-renamed:8081
       GQA_EVIDENCE_DIR: /evidence
       GQA_LLM_CHAT_COMPLETIONS_URL: ${GQA_LLM_CHAT_COMPLETIONS_URL:-}
       GQA_LLM_MODEL: ${GQA_LLM_MODEL:-}
@@ -57,6 +57,16 @@ services:
 
   fixture:
     build: ./apps/fixture
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8081/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  fixture-renamed:
+    build: ./apps/fixture
+    environment:
+      GQA_FIXTURE_DETAIL_LABEL: Reveal details
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8081/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 5s

@@ -1,5 +1,6 @@
 "use strict";
 const { allowedTarget } = require("./policy.cjs");
+const { collectRepairSuggestion } = require("./repair-hints.cjs");
 const ROLES = new Set(["button", "link", "heading", "textbox"]);
 const OPS = new Set(["navigate", "click_role", "fill_label", "assert_text", "assert_visible_role", "assert_url_path"]);
 
@@ -106,9 +107,11 @@ async function runBrowserFlow(target, steps, allowlist) {
         checks.push({ name: stepName(i, s), status: "passed",
           duration_ms: Date.now() - started, detail });
       } catch (err) {
+        const repair = await collectRepairSuggestion(page,s,i);
         checks.push({ name: stepName(i, s), status: "failed",
           duration_ms: Date.now() - started,
-          detail: String(err.message || err).split("\n")[0].slice(0, 200) });
+          detail: String(err.message || err).split("\n")[0].slice(0, 200),
+          ...(repair ? {repair} : {}) });
         break;
       }
     }

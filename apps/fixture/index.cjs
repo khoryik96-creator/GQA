@@ -1,5 +1,6 @@
 "use strict";
 const http = require("node:http");
+const detailLabel = process.env.GQA_FIXTURE_DETAIL_LABEL === "Reveal details" ? "Reveal details" : "Show details";
 http.createServer((req, res) => {
   if (req.method !== "GET") { res.writeHead(405).end("Method not allowed"); return; }
   if (req.url === "/healthz") {
@@ -11,7 +12,7 @@ http.createServer((req, res) => {
     res.end(`<!doctype html><html lang="en"><head><title>GQA Smoke Fixture</title></head>
       <body><main><h1>GQA Read-Only Smoke Target</h1>
       <p>This is a controlled local test fixture.</p>
-      <button type="button" id="show-details">Show details</button>
+      <button type="button" id="show-details">${detailLabel}</button>
       <p id="details" hidden>Fixture details visible</p>
       <label for="email">Email</label><input type="email" id="email" />
       <button type="button" id="preview">Preview email</button>

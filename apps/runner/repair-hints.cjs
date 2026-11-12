@@ -58,6 +58,8 @@ function suggestFromCandidates(action, candidateNames, stepIndex) {
 async function collectRepairSuggestion(page, action, index) {
   if (!action || action.op !== "click_role") return null;
   try {
+    // Existing disabled controls are possible application defects, not rename cases.
+    if (await page.getByRole(action.role,{name:action.name,exact:true}).count()) return null;
     const locators = await page.getByRole(action.role).all();
     if (locators.length > 24) return null;
     const names = [];
