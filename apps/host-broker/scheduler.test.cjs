@@ -117,3 +117,21 @@ test("corrupt persistent journal is rejected",t=>{
  fs.writeFileSync(path.join(dir,"jobs.json"),"invalid JSON");
  assert.throws(()=>new JobStore(dir).load());
 });
+
+test("worker cleanup failure blocks subsequent job launches",async t=>{
+ const dir=temp(t);
+ const scheduler=new Scheduler({store:new JobStore(dir),cleanup:async()=>{},
+   runJob:async(_job,options)=>({
+     checks:[{name:"Cleanup",status:"failed",detail:"Unremoved container"}],
+     screenshot_base64:"",
+     evidence:{job_id:options.id,worker_lifecycle:"ephemeral_container",
+       failure_kind:"worker_cleanup_failed"}
+   })});
+ await scheduler.start();
+ const launched=scheduler.submitSync(spec);
+ const result=await launched.done;
+ assert.equal(result.evidence.failure_kind,"worker_cleanup_failed");
+ assert.equal(scheduler.get(launched.job.id).status,"recovery_pending");
+ assert.equal(scheduler.ready,false);
+ assert.throws(()=>scheduler.enqueue(spec),/recovery incomplete/);
+});

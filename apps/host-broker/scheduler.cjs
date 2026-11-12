@@ -75,6 +75,16 @@ class Scheduler {
       project:this.project,signal:controller.signal,id:next.id,
       timeoutMs:next.kind==="smoke"?24000:55000
     })).then(result=>{
+      const cleanupFailed=result?.evidence?.failure_kind==="worker_cleanup_failed";
+      if(cleanupFailed){
+        // The container could still exist. Block new tests until a later
+        // restart reconciles the exact orphan identity.
+        this.ready=false;
+        this.store.transition(next.id,{status:"recovery_pending",
+          failure_kind:"worker_cleanup_failed",check_count:1});
+        this.settle(next.id,result);
+        return;
+      }
       const cancelled=controller.signal.aborted;
       const final=cancelled?failure("worker_cancelled",next.id):result;
       const anyFailed=final.checks?.some(c=>c.status!=="passed")!==false;
