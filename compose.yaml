@@ -1,0 +1,39 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: gqa
+      POSTGRES_USER: gqa
+      POSTGRES_PASSWORD: gqa_local_only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gqa -d gqa"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - gqa_pgdata:/var/lib/postgresql/data
+
+  api:
+    build: ./apps/api
+    environment:
+      DATABASE_URL: postgres://gqa:gqa_local_only@db:5432/gqa?sslmode=disable
+      PORT: "8080"
+      ALLOWED_ORIGIN: http://localhost:3000
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8080
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  gqa_pgdata:
