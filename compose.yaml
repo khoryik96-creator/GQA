@@ -45,7 +45,7 @@ services:
     init: true
     environment:
       GQA_RUNNER_TOKEN: gqa_local_dev_runner_token_only
-      GQA_SMOKE_TARGETS: http://fixture:8081
+      GQA_SMOKE_TARGETS: http://fixture:8081,http://fixture-renamed:8081
     depends_on:
       fixture:
         condition: service_healthy
