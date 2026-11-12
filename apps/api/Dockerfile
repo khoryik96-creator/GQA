@@ -1,8 +1,8 @@
 FROM golang:1.23-alpine AS build
 WORKDIR /src
 COPY go.mod ./
-RUN go mod download
 COPY . .
+RUN go mod tidy
 RUN CGO_ENABLED=0 go build -o /out/gqa-api .
 
 FROM alpine:3.21
