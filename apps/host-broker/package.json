@@ -1,0 +1,1 @@
+{"name":"gqa-local-host-broker","private":true,"version":"0.10.0","scripts":{"test":"node --test"}}

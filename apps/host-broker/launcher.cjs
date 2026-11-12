@@ -1,0 +1,71 @@
+"use strict";
+
+const { execFile } = require("node:child_process");
+const crypto = require("node:crypto");
+const { promisify } = require("node:util");
+
+const exec = promisify(execFile);
+const FIXTURES="http://fixture:8081,http://fixture-renamed:8081";
+const IMAGE="gqa-job:local";
+
+function safeProjectName(value) {
+  return /^[a-z][a-z0-9_-]{0,32}$/.test(value);
+}
+function containerArgs(job,name,project="gqa") {
+  if (!safeProjectName(project) || !/^gqa-qa-[a-f0-9-]{36}$/.test(name))
+    throw new Error("Unapproved Docker project or job identity");
+  const encoded=Buffer.from(JSON.stringify(job)).toString("base64");
+  if (encoded.length>21000) throw new Error("QA job exceeds limit");
+  return [
+    "run","--rm","--pull","never","--name",name,
+    "--network",project+"_qa_execution",
+    "--read-only","--cap-drop","ALL",
+    "--security-opt","no-new-privileges",
+    "--pids-limit","128","--memory","2g","--memory-swap","2g",
+    "--cpus","1.5","--shm-size","256m",
+    "--tmpfs","/tmp:rw,nosuid,size=512m",
+    "--user","pwuser","--label","com.gqa.component=ephemeral-job",
+    "--env","GQA_JOB_SPEC="+encoded,
+    IMAGE,"node","/worker/container-job.cjs"
+  ];
+}
+function failure(kind,id) {
+  return {checks:[{name:"Ephemeral job lifecycle",status:"failed",duration_ms:0,
+    detail:kind==="worker_timeout"?"Job exceeded its allowed runtime":"Container job did not return valid evidence"}],
+    screenshot_base64:"",
+    evidence:{job_id:id,worker_lifecycle:"ephemeral_container",
+      failure_kind:kind,console_errors:0,page_exceptions:0,failed_requests:0,http_5xx:0}};
+}
+function validateResult(result,id) {
+  if (!result || !Array.isArray(result.checks) || result.checks.length<1 ||
+      result.checks.length>20 || result.checks.some(c=>
+        !c || !["passed","failed"].includes(c.status) ||
+        typeof c.name!=="string" || c.name.length>120 ||
+        typeof c.detail!=="string" || c.detail.length>400) ||
+      typeof result.screenshot_base64!=="string" ||
+      result.screenshot_base64.length>1400000) return failure("invalid_worker_result",id);
+  const evidence=result.evidence || {};
+  return {...result,evidence:{...evidence,job_id:id,worker_lifecycle:"ephemeral_container"}};
+}
+async function executeJob(job,{project="gqa",run=exec,timeoutMs=55000}={}) {
+  const id=crypto.randomUUID();
+  const name="gqa-qa-"+id;
+  let result;
+  try {
+    const args=containerArgs(job,name,project);
+    const answer=await run("docker",args,{timeout:timeoutMs,maxBuffer:2200000,
+      windowsHide:true,killSignal:"SIGKILL",env:process.env});
+    const output=answer.stdout.trim();
+    if (output.length>1950000 || output.includes("\n")) return failure("invalid_worker_result",id);
+    result=validateResult(JSON.parse(output),id);
+  } catch (err) {
+    result=failure(err.killed || err.signal==="SIGKILL"?"worker_timeout":"worker_error",id);
+  } finally {
+    // The CLI may have timed out while its container continued. Make a
+    // second best-effort cleanup attempt by exact generated container name.
+    await run("docker",["rm","-f",name],{timeout:8000,maxBuffer:20000,
+      windowsHide:true,env:process.env}).catch(()=>{});
+  }
+  return result;
+}
+module.exports={FIXTURES,IMAGE,safeProjectName,containerArgs,failure,validateResult,executeJob};
