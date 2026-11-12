@@ -5,7 +5,7 @@ import {
   Activity, AlertTriangle, ArrowRight, BrainCircuit, CheckCircle2,
   Clock3, Database, FileCode2, FolderKanban, GitBranch, Globe2,
   History, Layers3, Loader2, Plus, Search, Send, ShieldCheck,
-  Smartphone, Sparkles, Target, Workflow, X, type LucideIcon
+  Smartphone, Sparkles, Target, Workflow, X, LogOut, LockKeyhole, type LucideIcon
 } from "lucide-react";
 import ScenarioReview, { type TestSpecification } from "../components/ScenarioReview";
 import BrowserFlowStudio from "../components/BrowserFlowStudio";
@@ -57,6 +57,7 @@ const kinds: MemoryKind[] = ["architecture", "requirement", "correction", "lesso
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(API + path, {
     ...init,
+    credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
     cache: "no-store"
   });
@@ -71,6 +72,10 @@ function when(iso: string) {
 }
 
 export default function CommandCenter() {
+  const [authStatus, setAuthStatus] = useState<"checking" | "anonymous" | "authenticated">("checking");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -102,14 +107,29 @@ export default function CommandCenter() {
   const latestRun = runs[0];
 
   useEffect(() => {
+    let cancelled = false;
+    fetch(API + "/api/auth/session", { credentials: "include", cache: "no-store" })
+      .then(response => { if (!cancelled) setAuthStatus(response.ok ? "authenticated" : "anonymous"); })
+      .catch(() => { if (!cancelled) setAuthStatus("anonymous"); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (authStatus !== "authenticated") return;
+    let cancelled = false;
+    setLoadingProjects(true);
     call<Project[]>("/api/projects")
       .then(list => {
-        setProjects(list);
-        if (list.length) setSelectedId(list[0].id);
+        if (!cancelled) {
+          setProjects(list);
+          setSelectedId(previous => list.some(project => project.id === previous) ?
+            previous : list[0]?.id || null);
+        }
       })
-      .catch(err => setError(err.message))
-      .finally(() => setLoadingProjects(false));
-  }, []);
+      .catch(err => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoadingProjects(false); });
+    return () => { cancelled = true; };
+  }, [authStatus]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -130,6 +150,40 @@ export default function CommandCenter() {
     }).catch(err => { if (!cancelled) setError(err.message); });
     return () => { cancelled = true; };
   }, [selectedId]);
+
+
+  async function signIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthBusy(true); setLoginError("");
+    try {
+      const response = await fetch(API + "/api/auth/login", {
+        method: "POST", credentials: "include", cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password })
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({error:"Login unavailable"}));
+        throw new Error(error.error || "Unable to log in");
+      }
+      setPassword("");
+      setAuthStatus("authenticated");
+    } catch (err) { setLoginError((err as Error).message); }
+    finally { setAuthBusy(false); }
+  }
+
+  async function signOut() {
+    setAuthBusy(true); setError("");
+    try {
+      const response = await fetch(API + "/api/auth/logout", {
+        method: "POST", credentials: "include", cache: "no-store",
+        headers: { "Content-Type": "application/json" }
+      });
+      if (!response.ok) throw new Error("Unable to revoke session");
+      setProjects([]); setSelectedId(null); setPlans([]); setMemories([]); setRuns([]);
+      setAuthStatus("anonymous"); setPassword("");
+    } catch (err) { setError((err as Error).message); }
+    finally { setAuthBusy(false); }
+  }
 
   async function createProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -222,6 +276,32 @@ export default function CommandCenter() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  if (authStatus !== "authenticated") {
+    return <main className="login-screen">
+      <div className="login-panel">
+        <div className="login-symbol"><BrainCircuit size={31}/></div>
+        <div className="eyebrow"><LockKeyhole size={14}/> GQA LOCAL ADMINISTRATOR</div>
+        <h1>{authStatus === "checking" ? "Checking session" : "Sign in to GQA"}</h1>
+        <p>{authStatus === "checking"
+          ? "Verifying your authenticated workspace..."
+          : "Access project memory, previous QA sessions and controlled test execution."}</p>
+        {authStatus === "anonymous" && <form onSubmit={signIn}>
+          <label>Administrator password
+            <input type="password" autoComplete="current-password" required
+              value={password} maxLength={256} onChange={e => setPassword(e.target.value)}
+              placeholder="Password configured in your local .env"/>
+          </label>
+          {loginError && <div className="browser-flow-error"><AlertTriangle size={15}/>{loginError}</div>}
+          <button className="button primary full-width" type="submit" disabled={authBusy || !password}>
+            {authBusy ? <Loader2 size={16} className="spin"/> : <LockKeyhole size={16}/>}
+            {authBusy ? "Signing in..." : "Sign in"}
+          </button>
+        </form>}
+        <p className="fine-print">Local prototype only. No cloud accounts or multi-user permissions are enabled.</p>
+      </div>
+    </main>;
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -249,7 +329,12 @@ export default function CommandCenter() {
       <main className="main">
         <header className="topbar">
           <div className="breadcrumb"><FolderKanban size={17}/><span>Workspace</span><span className="slash">/</span><strong>{selected?.name || "Overview"}</strong></div>
-          <span className="preview-label"><span className="status-dot"/> LOCAL DEVELOPMENT</span>
+          <div className="topbar-actions">
+            <span className="preview-label"><span className="status-dot"/> LOCAL DEVELOPMENT</span>
+            <button className="button secondary" type="button" onClick={signOut} disabled={authBusy}>
+              <LogOut size={15}/> Sign out
+            </button>
+          </div>
         </header>
 
         <div className="content">

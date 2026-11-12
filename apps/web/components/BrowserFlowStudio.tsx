@@ -52,7 +52,8 @@ function describeAction(a: BrowserAction) {
 
 async function requestJSON<T>(api: string, path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(api + path, {
-    ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    ...init, credentials: "include",
+    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
     cache: "no-store"
   });
   if (!resp.ok) {
