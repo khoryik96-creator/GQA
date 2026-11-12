@@ -97,6 +97,7 @@ async function runSmoke(target, runAPI, runWeb) {
 }
 
 const server = http.createServer((req, res) => {
+  if (req.method === "GET" && req.url === "/healthz") return send(res, 200, { status: "ok", busy: running });
   if (req.method !== "POST" || req.url !== "/run") return send(res, 404, { error: "Not found" });
   if (!tokenMatches(req.headers["x-gqa-runner-token"], TOKEN)) return send(res, 401, { error: "Unauthorized" });
   if (running) return send(res, 429, { error: "Runner busy" });
