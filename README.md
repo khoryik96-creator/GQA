@@ -326,3 +326,49 @@ resets, password invitations, email confirmation, MFA, SSO, distributed
 rate limits, external staging worker pools, formal security assessment,
 disposable VM execution or strong browser isolation. Tests already started
 may finish even after a member is revoked. Do not publicly deploy GQA.
+
+
+## v0.9 — Account security and session recovery
+
+This release adds stronger lifecycle controls for individually authenticated
+accounts, building on v0.8 project-level role checks.
+
+### Change your own password
+
+1. Sign in and click **Account security** in the top bar.
+2. Enter your current password and a new, unique 16–72-byte password.
+3. Submit the change. All active sessions for your account are revoked.
+4. Sign in again with the new password on each device.
+
+Use **Revoke all sessions** from Account security when a device may have
+been lost or a browser session is no longer trusted.
+
+### Administrator recovery and suspension
+
+1. Log in as the global administrator and open **Team Access** inside a
+   project.
+2. Under **Account administration**, select an existing teammate.
+3. Suspend or reactivate the account using a predefined reason, or reset
+   the password with a new, unique value.
+4. Suspensions and password resets revoke all previous sessions.
+   Reactivating an account requires a fresh login.
+5. Review the account security event log, which records the actor,
+   target account, action, reason category and timestamp.
+
+Only global admins can suspend accounts or reset other users' passwords.
+The administrator cannot suspend their own account or have their password
+reset through the teammate recovery route. Administrators must change
+their own password using Account security instead.
+
+Credentials are bcrypt-hashed before storage; raw passwords are not logged
+to the account security audit table or included in API responses. Password
+changes and administrative actions are applied transactionally with session
+revocation.
+
+### Important boundaries
+
+This is still a **local development prototype**. It does not provide email
+invitations, MFA, passkeys, SSO, password-recovery emails, distributed login
+rate limiting, per-job VM/container isolation, or in-flight job cancellation.
+A test already running when an account is suspended could finish. Do not
+expose GQA publicly or allow untrusted applications into the browser worker.
