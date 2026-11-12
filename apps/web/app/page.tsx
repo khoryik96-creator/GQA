@@ -31,7 +31,7 @@ type Plan = {
   status: string; created_at: string;
 };
 type SmokeCheck = { name: string; status: string; duration_ms: number; detail: string };
-type TestRun = { id: string; project_id: string; plan_id: string; target_url: string; status: string; checks: SmokeCheck[]; screenshot_available: boolean; started_at: string; finished_at: string | null };
+type TestRun = { id: string; project_id: string; plan_id: string; target_url: string; status: string; checks: SmokeCheck[]; screenshot_available: boolean; started_at: string; finished_at: string | null; evidence?: {failure_kind?: string;worker_lifecycle?: string;job_id?: string} };
 type Memory = {
   id: string; project_id: string; kind: MemoryKind; content: string;
   source: string; status: string; supersedes_id: string; created_at: string;
@@ -420,6 +420,10 @@ export default function CommandCenter() {
                       </form>
                       {latestRun && <div className="run-result">
                         <div className="run-heading"><strong>Latest run · {when(latestRun.started_at)}</strong><span className={"pill " + (latestRun.status === "passed" ? "" : "warning")}>{latestRun.status}</span></div>
+                        {latestRun.evidence && <p className="fine-print">
+                          Worker: {latestRun.evidence.worker_lifecycle === "single_job_process" ? "new process for this run" : "legacy"}
+                          {latestRun.evidence.failure_kind && " · Result category: " + latestRun.evidence.failure_kind.replaceAll("_", " ")}
+                        </p>}
                         {latestRun.checks.map((check, index) => <div className="check-row" key={index}>
                           {check.status === "passed" ? <CheckCircle2 size={16} className="check-pass"/> : <AlertTriangle size={16} className="check-fail"/>}
                           <div><strong>{check.name}</strong><p>{check.detail} · {check.duration_ms}ms</p></div>

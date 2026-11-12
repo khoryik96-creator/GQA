@@ -117,6 +117,9 @@ jobs:
           }, run
           assert all(x["status"] == "passed" for x in run["checks"]), run
           assert run["screenshot_available"], run
+          assert run["evidence"]["worker_lifecycle"] == "single_job_process", run
+          assert run["evidence"]["failure_kind"] == "none", run
+          assert run["evidence"]["job_id"], run
 
           screenshot = urllib.request.urlopen(
               BASE + "/api/runs/" + run["id"] + "/screenshot", timeout=10
@@ -167,6 +170,9 @@ jobs:
           assert all(x["status"] == "passed" for x in browser_run["checks"]), browser_run
           assert len(browser_run["checks"]) >= 4, browser_run
           assert browser_run["screenshot_available"], browser_run
+          assert browser_run["evidence"]["worker_lifecycle"] == "single_job_process"
+          assert browser_run["evidence"]["failure_kind"] == "none"
+          assert browser_run["evidence"]["job_id"] != run["evidence"]["job_id"]
 
           email_flow = request(f"/api/projects/{project_id}/flows", {
               "plan_id": plan["id"],
@@ -206,6 +212,10 @@ jobs:
           assert len(hints) == 1, broken
           assert hints[0]["original_name"] == "Show details", hints
           assert hints[0]["proposed_name"] == "Reveal details", hints
+          assert broken["evidence"]["failure_kind"] == "locator_rename_candidate", broken
+          assert broken["evidence"]["failed_step_index"] == hints[0]["step_index"], broken
+          assert broken["evidence"]["worker_lifecycle"] == "single_job_process", broken
+          assert broken["evidence"]["last_path"] == "/", broken
 
           repair = request(f"/api/projects/{project_id}/flows/{flow['id']}/propose-repair", {
               "failed_run_id": broken["id"]
@@ -232,6 +242,8 @@ jobs:
               "acknowledged_digest": repair["digest"]
           })
           assert repaired_run["status"] == "passed", repaired_run
+          assert repaired_run["evidence"]["failure_kind"] == "none", repaired_run
+          assert repaired_run["evidence"]["job_id"] != broken["evidence"]["job_id"]
           assert all(x["status"] == "passed" for x in repaired_run["checks"]), repaired_run
 
           accepted = request(f"/api/projects/{project_id}/flows/{repair['id']}/confirm-repair", {

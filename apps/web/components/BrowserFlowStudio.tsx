@@ -26,9 +26,16 @@ type RepairReview = {
   target_url: string; old_name: string; new_name: string; app_revision: string;
   memory_id: string; accepted_at: string;
 };
+type RunEvidence = {
+  job_id?: string; worker_lifecycle?: string; failure_kind?: string;
+  failed_step_index?: number | null; last_path?: string;
+  console_errors?: number; page_exceptions?: number;
+  failed_requests?: number; http_5xx?: number;
+};
 type TestRun = {
   id: string; flow_id?: string; status: string; checks: SmokeCheck[];
   screenshot_available: boolean; started_at: string; execution_kind: string;
+  evidence?: RunEvidence;
 };
 type Props = {
   projectId: string;
@@ -234,6 +241,21 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, hasWeb, a
           <div className="run-heading"><strong><ClipboardCheck size={16}/> Browser flow results</strong>
             <span className={"pill " + (latestRun.status==="passed" ? "" : "warning")}>{latestRun.status}</span>
           </div>
+          {latestRun.evidence && <div className="browser-evidence">
+            <strong>Execution diagnostics</strong>
+            <div className="browser-evidence-grid">
+              <span>Failure category <b>{(latestRun.evidence.failure_kind || "unknown").replaceAll("_"," ")}</b></span>
+              <span>Worker lifetime <b>{latestRun.evidence.worker_lifecycle === "single_job_process" ? "One short-lived process" : "Legacy / unverified"}</b></span>
+              <span>Browser console errors <b>{latestRun.evidence.console_errors ?? 0}</b></span>
+              <span>Uncaught page exceptions <b>{latestRun.evidence.page_exceptions ?? 0}</b></span>
+              <span>Failed network requests <b>{latestRun.evidence.failed_requests ?? 0}</b></span>
+              <span>HTTP 5xx responses <b>{latestRun.evidence.http_5xx ?? 0}</b></span>
+              {latestRun.evidence.last_path && <span>Last page path <b>{latestRun.evidence.last_path}</b></span>}
+              {latestRun.evidence.failed_step_index != null &&
+                <span>Failed action <b>Step {latestRun.evidence.failed_step_index+1}</b></span>}
+            </div>
+            <p>Only aggregate error counts are stored. Raw console output, tokens and response bodies are excluded.</p>
+          </div>}
           {latestRun.checks.map((check,index) => <div className="check-row" key={index}>
             {check.status==="passed" ? <CheckCircle2 size={16} className="check-pass"/> : <AlertTriangle size={16} className="check-fail"/>}
             <div><strong>{check.name}</strong><p>{check.detail} · {check.duration_ms}ms</p></div>
