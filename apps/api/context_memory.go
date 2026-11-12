@@ -42,7 +42,7 @@ func enrichedPlanningContext(stack,prompt string,repo RepoSnapshot,memories []Me
   for _,memory:=range memories {
     // Preferences and business rules may influence recommended agents,
     // but can never override the server's environment approval policy.
-    if memory.Kind=="requirement"||memory.Kind=="architecture"||memory.Kind=="preference"||memory.Kind=="correction"{
+    if memory.Kind=="requirement"||memory.Kind=="architecture"||memory.Kind=="preference"||memory.Kind=="correction"||memory.Kind=="lesson"{
       context+="\n[confirmed project memory] "+memory.Content
     }
   }
