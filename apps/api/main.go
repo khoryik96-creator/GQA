@@ -32,6 +32,7 @@ type Project struct {
   AppType   string    `json:"app_type"`
   Stack     string    `json:"stack"`
   CreatedAt time.Time `json:"created_at"`
+  MyRole string `json:"my_role"`
 }
 
 type Memory struct {
@@ -80,6 +81,7 @@ func main() {
   auth,err:=newAuthenticator(db,os.Getenv("GQA_ADMIN_PASSWORD"),origin,
     os.Getenv("GQA_COOKIE_SECURE")=="true")
   if err!=nil{log.Fatal("authentication setup: ",err)}
+  if err:=auth.bootstrap(ctx);err!=nil{log.Fatal("admin account bootstrap: ",err)}
   if len(os.Getenv("GQA_RUNNER_TOKEN"))<24 {
     log.Fatal("GQA_RUNNER_TOKEN must be a 24+ character secret in local .env")
   }
@@ -91,22 +93,28 @@ func main() {
     writeJSON(w, 200, map[string]string{"status":"ok"})
   })
   mux.HandleFunc("GET /api/projects", s.projects)
-  mux.HandleFunc("POST /api/projects", s.projects)
-  mux.HandleFunc("GET /api/projects/{id}/memories", s.memories)
-  mux.HandleFunc("POST /api/projects/{id}/memories", s.memories)
-  mux.HandleFunc("GET /api/projects/{id}/plans", s.plans)
-  mux.HandleFunc("POST /api/projects/{id}/plans", s.plans)
-  mux.HandleFunc("GET /api/projects/{id}/inspection", s.inspection)
-  mux.HandleFunc("POST /api/projects/{id}/inspection", s.inspection)
-  mux.HandleFunc("GET /api/projects/{id}/flows", s.browserFlows)
-  mux.HandleFunc("POST /api/projects/{id}/flows", s.browserFlows)
-  mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/execute", s.executeBrowserFlow)
-  mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/propose-repair", s.proposeRepair)
-  mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/confirm-repair", s.confirmRepair)
-  mux.HandleFunc("GET /api/projects/{id}/repairs", s.reviewedRepairs)
-  mux.HandleFunc("GET /api/projects/{id}/runs", s.runs)
-  mux.HandleFunc("POST /api/projects/{id}/runs", s.runs)
-  mux.HandleFunc("GET /api/runs/{id}/screenshot", s.screenshot)
+  mux.HandleFunc("POST /api/projects", auth.admin(s.projects))
+  mux.HandleFunc("GET /api/projects/{id}/memories", auth.project("read",s.memories))
+  mux.HandleFunc("POST /api/projects/{id}/memories", auth.project("qa",s.memories))
+  mux.HandleFunc("GET /api/projects/{id}/plans", auth.project("read",s.plans))
+  mux.HandleFunc("POST /api/projects/{id}/plans", auth.project("qa",s.plans))
+  mux.HandleFunc("GET /api/projects/{id}/inspection", auth.project("read",s.inspection))
+  mux.HandleFunc("POST /api/projects/{id}/inspection", auth.project("qa",s.inspection))
+  mux.HandleFunc("GET /api/projects/{id}/flows", auth.project("read",s.browserFlows))
+  mux.HandleFunc("POST /api/projects/{id}/flows", auth.project("qa",s.browserFlows))
+  mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/execute", auth.project("qa",s.executeBrowserFlow))
+  mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/propose-repair", auth.project("qa",s.proposeRepair))
+  mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/confirm-repair", auth.project("review",s.confirmRepair))
+  mux.HandleFunc("GET /api/projects/{id}/repairs", auth.project("read",s.reviewedRepairs))
+  mux.HandleFunc("GET /api/projects/{id}/runs", auth.project("read",s.runs))
+  mux.HandleFunc("POST /api/projects/{id}/runs", auth.project("qa",s.runs))
+  mux.HandleFunc("GET /api/runs/{id}/screenshot", auth.screenshot(s.screenshot))
+  mux.HandleFunc("GET /api/admin/users",auth.admin(s.users))
+  mux.HandleFunc("POST /api/admin/users",auth.admin(s.users))
+  mux.HandleFunc("GET /api/projects/{id}/members",auth.project("manage",s.projectMembers))
+  mux.HandleFunc("POST /api/projects/{id}/members",auth.project("manage",s.projectMembers))
+  mux.HandleFunc("DELETE /api/projects/{id}/members/{userId}",auth.project("manage",s.removeProjectMember))
+  mux.HandleFunc("GET /api/projects/{id}/access-audit",auth.project("manage",s.accessAudit))
   mux.HandleFunc("OPTIONS /", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
   port := os.Getenv("PORT")
   if port == "" { port = "8080" }
@@ -125,7 +133,7 @@ func cors(next http.Handler, origin string) http.Handler {
       w.Header().Set("Access-Control-Allow-Credentials","true")
     }
     w.Header().Set("Vary","Origin")
-    w.Header().Set("Access-Control-Allow-Methods","GET, POST, OPTIONS")
+    w.Header().Set("Access-Control-Allow-Methods","GET, POST, DELETE, OPTIONS")
     w.Header().Set("Access-Control-Allow-Headers","Content-Type")
     w.Header().Set("X-Content-Type-Options","nosniff")
     w.Header().Set("X-Frame-Options","DENY")
@@ -184,13 +192,28 @@ func isOneOf(input string, allowed ...string) bool {
 
 func (s *server) projects(w http.ResponseWriter, r *http.Request) {
   if r.Method == http.MethodGet {
-    rows, err := s.db.Query(r.Context(), "SELECT id::text, name, repo_url, app_type, stack, created_at FROM projects ORDER BY created_at DESC LIMIT 100")
+    account,ok:=currentAccount(r)
+    if !ok {fail(w,401,"Account login required");return}
+    sql:=`SELECT p.id::text,p.name,p.repo_url,p.app_type,p.stack,p.created_at,
+       'admin'::text AS my_role
+       FROM projects p ORDER BY p.created_at DESC LIMIT 100`
+    var rows pgx.Rows
+    var err error
+    if account.GlobalRole=="admin" {
+      rows,err=s.db.Query(r.Context(),sql)
+    } else {
+      sql=`SELECT p.id::text,p.name,p.repo_url,p.app_type,p.stack,p.created_at,
+        m.role AS my_role
+        FROM projects p JOIN project_memberships m ON m.project_id=p.id
+        WHERE m.user_id=$1::uuid ORDER BY p.created_at DESC LIMIT 100`
+      rows,err=s.db.Query(r.Context(),sql,account.ID)
+    }
     if err != nil { fail(w, 500, "Unable to retrieve projects"); return }
     defer rows.Close()
     projects := []Project{}
     for rows.Next() {
       var p Project
-      if err := rows.Scan(&p.ID, &p.Name, &p.RepoURL, &p.AppType, &p.Stack, &p.CreatedAt); err != nil {
+      if err := rows.Scan(&p.ID, &p.Name, &p.RepoURL, &p.AppType, &p.Stack, &p.CreatedAt,&p.MyRole); err != nil {
         fail(w, 500, "Unable to read projects"); return
       }
       projects = append(projects, p)
@@ -221,6 +244,7 @@ func (s *server) projects(w http.ResponseWriter, r *http.Request) {
     input.Name,input.RepoURL,input.AppType,input.Stack,
   ).Scan(&p.ID,&p.Name,&p.RepoURL,&p.AppType,&p.Stack,&p.CreatedAt)
   if err != nil { fail(w,500,"Unable to create project"); return }
+  p.MyRole="admin"
   writeJSON(w,201,p)
 }
 

@@ -4,7 +4,6 @@ import (
  "context"
  "crypto/rand"
  "crypto/sha256"
- "crypto/subtle"
  "encoding/hex"
  "errors"
  "net"
@@ -51,8 +50,8 @@ type authenticator struct {
 }
 
 func newAuthenticator(db *pgxpool.Pool,password,allowedOrigin string,secure bool)(*authenticator,error){
- if len(password)<16 || len(password)>256 {
-  return nil,errors.New("GQA_ADMIN_PASSWORD must contain 16-256 characters; configure it in your local .env")
+ if len(password)<16 || len(password)>72 {
+  return nil,errors.New("GQA_ADMIN_PASSWORD must contain 16-72 bytes; configure it in your local .env")
  }
  if !strings.HasPrefix(allowedOrigin,"http://localhost:") &&
   !strings.HasPrefix(allowedOrigin,"https://") {
@@ -224,4 +223,3 @@ func (a *authenticator) enforce(next http.Handler)http.Handler{
 }
 
 // This helper is kept simple: passwords are never stored in the clear.
-var _=subtle.ConstantTimeCompare

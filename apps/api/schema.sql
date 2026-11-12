@@ -135,3 +135,38 @@ WHERE revoked_at IS NULL;
 
 -- v0.7: bounded, redacted per-run diagnostic summary.
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- v0.8: account principals and scoped membership; existing single-admin
+-- sessions have no user_id and are invalidated by the new login query.
+CREATE TABLE IF NOT EXISTS gqa_users (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ email TEXT NOT NULL UNIQUE,
+ password_hash TEXT NOT NULL,
+ global_role TEXT NOT NULL DEFAULT 'member'
+   CHECK (global_role IN ('admin','member')),
+ active BOOLEAN NOT NULL DEFAULT TRUE,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES gqa_users(id);
+CREATE INDEX IF NOT EXISTS auth_sessions_user_active
+  ON auth_sessions(user_id,expires_at) WHERE revoked_at IS NULL;
+CREATE TABLE IF NOT EXISTS project_memberships (
+ project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ user_id UUID NOT NULL REFERENCES gqa_users(id) ON DELETE CASCADE,
+ role TEXT NOT NULL CHECK (role IN ('owner','qa','reviewer','viewer')),
+ granted_by UUID NOT NULL REFERENCES gqa_users(id),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ PRIMARY KEY (project_id,user_id)
+);
+CREATE INDEX IF NOT EXISTS project_memberships_user ON project_memberships(user_id);
+CREATE TABLE IF NOT EXISTS project_access_audit (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ actor_id UUID NOT NULL REFERENCES gqa_users(id),
+ subject_id UUID NOT NULL REFERENCES gqa_users(id),
+ action TEXT NOT NULL CHECK (action IN ('upsert','revoke')),
+ old_role TEXT NOT NULL DEFAULT '',
+ new_role TEXT NOT NULL DEFAULT '',
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS project_access_audit_project ON project_access_audit(project_id,created_at DESC);
