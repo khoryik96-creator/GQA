@@ -17,6 +17,17 @@ jobs:
       - name: Build and start local stack
         run: docker compose up --build -d
 
+      - name: Verify isolated worker settings and deny external egress
+        run: |
+          runner_id="$(docker compose ps -q runner)"
+          test -n "$runner_id"
+          test "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$runner_id")" = "true"
+          test "$(docker inspect -f '{{.HostConfig.PidsLimit}}' "$runner_id")" = "256"
+          docker compose exec -T runner node -e '
+            fetch("https://example.com", {signal: AbortSignal.timeout(3000)})
+              .then(() => { console.error("External worker egress was allowed"); process.exit(1); })
+              .catch(() => { console.log("PASS: external worker egress denied"); process.exit(0); })
+          '
       - name: Verify memory-aware planning and real smoke checks
         run: |
           python3 - <<'PY'
