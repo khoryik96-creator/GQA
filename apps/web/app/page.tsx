@@ -10,6 +10,7 @@ import {
 import ScenarioReview, { type TestSpecification } from "../components/ScenarioReview";
 import BrowserFlowStudio from "../components/BrowserFlowStudio";
 import TeamAccess from "../components/TeamAccess";
+import AccountSecurity from "../components/AccountSecurity";
 
 type AppType = "fullstack" | "web" | "api" | "backend" | "mobile";
 type Environment = "local" | "staging" | "production";
@@ -82,6 +83,7 @@ export default function CommandCenter() {
   const [account, setAccount] = useState<Account | null>(null);
   const [loginError, setLoginError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -191,6 +193,12 @@ export default function CommandCenter() {
     finally { setAuthBusy(false); }
   }
 
+  function clearSessionUI() {
+    setProjects([]);setSelectedId(null);setPlans([]);setMemories([]);setRuns([]);
+    setAuthStatus("anonymous");setPassword("");setAccount(null);
+    setSecurityOpen(false);setView("command");
+  }
+
   async function signOut() {
     setAuthBusy(true); setError("");
     try {
@@ -199,8 +207,7 @@ export default function CommandCenter() {
         headers: { "Content-Type": "application/json" }
       });
       if (!response.ok) throw new Error("Unable to revoke session");
-      setProjects([]); setSelectedId(null); setPlans([]); setMemories([]); setRuns([]);
-      setAuthStatus("anonymous"); setPassword("");setAccount(null);
+      clearSessionUI();
     } catch (err) { setError((err as Error).message); }
     finally { setAuthBusy(false); }
   }
@@ -358,6 +365,9 @@ export default function CommandCenter() {
           <div className="breadcrumb"><FolderKanban size={17}/><span>Workspace</span><span className="slash">/</span><strong>{selected?.name || "Overview"}</strong></div>
           <div className="topbar-actions">
             <span className="preview-label"><span className="status-dot"/> {account?.email||"Local development"}</span>
+            <button className="button secondary" type="button" onClick={()=>setSecurityOpen(open=>!open)}>
+              <LockKeyhole size={15}/> Account security
+            </button>
             <button className="button secondary" type="button" onClick={signOut} disabled={authBusy}>
               <LogOut size={15}/> Sign out
             </button>
@@ -365,6 +375,8 @@ export default function CommandCenter() {
         </header>
 
         <div className="content">
+          {securityOpen && account && <AccountSecurity apiBase={API} email={account.email}
+            onClose={()=>setSecurityOpen(false)} onSignedOut={clearSessionUI}/>}
           {error && <div className="error-banner"><AlertTriangle size={17}/><span>{error}</span><button onClick={() => setError("")} title="Dismiss"><X size={16}/></button></div>}
 
           {showCreate && isAdmin && (

@@ -2,6 +2,7 @@
 
 import {useEffect,useState,type FormEvent} from "react";
 import {AlertTriangle,CheckCircle2,Loader2,ShieldCheck,UserPlus,Users,X} from "lucide-react";
+import AdminAccounts from "./AdminAccounts";
 
 type Role="owner"|"qa"|"reviewer"|"viewer";
 type Member={user_id:string;email:string;role:Role;added_at:string};
@@ -126,6 +127,8 @@ export default function TeamAccess({projectId,apiBase,isAdmin,selfUserId}:Props)
     </form>
     <p className="small muted">{users.length} account(s) registered, including administrator.</p>
    </section>}
+   {isAdmin&&<AdminAccounts apiBase={apiBase} users={users} selfUserId={selfUserId}
+     onChanged={()=>setRefresh(v=>v+1)}/>}
    <section className="card">
     <div className="card-head"><div><h2>Access change history</h2><p>Who granted, changed or revoked membership.</p></div></div>
     {audit.length===0?<p className="muted small">No access changes recorded.</p>:
