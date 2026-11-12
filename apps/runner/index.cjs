@@ -4,6 +4,7 @@ const http = require("node:http");
 const crypto = require("node:crypto");
 const { chromium } = require("playwright");
 const { allowedTarget } = require("./policy.cjs");
+const { validateFlow, runBrowserFlow } = require("./browser-flow.cjs");
 
 const PORT = Number(process.env.PORT || 8090);
 const ALLOWLIST = process.env.GQA_SMOKE_TARGETS || "http://fixture:8081";
@@ -98,21 +99,31 @@ async function runSmoke(target, runAPI, runWeb) {
 
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/healthz") return send(res, 200, { status: "ok", busy: running });
-  if (req.method !== "POST" || req.url !== "/run") return send(res, 404, { error: "Not found" });
+  if (req.method !== "POST" || !["/run", "/flow"].includes(req.url)) return send(res, 404, { error: "Not found" });
   if (!tokenMatches(req.headers["x-gqa-runner-token"], TOKEN)) return send(res, 401, { error: "Unauthorized" });
   if (running) return send(res, 429, { error: "Runner busy" });
   let raw = "";
   req.on("data", chunk => {
     raw += chunk;
-    if (raw.length > 4096) req.destroy();
+    if (raw.length > 16384) req.destroy();
   });
   req.on("end", async () => {
     let input;
     try { input = JSON.parse(raw); } catch { return send(res, 400, { error: "Invalid JSON" }); }
-    if (!allowedTarget(input.target_url, ALLOWLIST) ||
-        typeof input.run_api !== "boolean" || typeof input.run_web !== "boolean" ||
+    if (!input || typeof input !== "object" || !allowedTarget(input.target_url, ALLOWLIST)) {
+      return send(res, 403, { error: "Target is not approved" });
+    }
+    if (req.url === "/flow") {
+      if (!validateFlow(input.steps)) return send(res, 400, { error: "Browser flow is not valid" });
+      running = true;
+      try { send(res, 200, await runBrowserFlow(input.target_url, input.steps, ALLOWLIST)); }
+      catch { send(res, 500, { error: "Browser flow worker failed" }); }
+      finally { running = false; }
+      return;
+    }
+    if (typeof input.run_api !== "boolean" || typeof input.run_web !== "boolean" ||
         (!input.run_api && !input.run_web)) {
-      return send(res, 403, { error: "Target or checks not approved" });
+      return send(res, 400, { error: "Invalid smoke request" });
     }
     running = true;
     try { send(res, 200, await runSmoke(input.target_url, input.run_api, input.run_web)); }
@@ -121,5 +132,5 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.requestTimeout = 35000;
+server.requestTimeout = 65000;
 server.listen(PORT, "0.0.0.0", () => console.log("GQA read-only runner ready on " + PORT));
