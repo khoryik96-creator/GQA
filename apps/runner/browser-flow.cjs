@@ -49,6 +49,11 @@ async function runBrowserFlow(target, steps, allowlist) {
   }
   const origin = new URL(target).origin;
   const checks = [];
+  const evidence = {
+    worker_lifecycle: "single_job_process", failure_kind: "none",
+    console_errors: 0, page_exceptions: 0, failed_requests: 0,
+    http_5xx: 0, last_path: "", failed_step_index: null
+  };
   let screenshot = "", browser, context;
   try {
     const { chromium } = require("playwright");
@@ -70,6 +75,24 @@ async function runBrowserFlow(target, steps, allowlist) {
     // bidirectional connections outside the controlled browser test.
     await context.routeWebSocket("**/*", socket => socket.close());
     const page = await context.newPage();
+    page.on("console", message => {
+      if (message.type() === "error") evidence.console_errors = Math.min(999, evidence.console_errors + 1);
+    });
+    page.on("pageerror", () => {
+      evidence.page_exceptions = Math.min(999, evidence.page_exceptions + 1);
+    });
+    page.on("requestfailed", request => {
+      try {
+        if (new URL(request.url()).origin === origin) {
+          evidence.failed_requests = Math.min(999, evidence.failed_requests + 1);
+        }
+      } catch { /* skip malformed URL */ }
+    });
+    page.on("response", response => {
+      if (response.status() >= 500) {
+        evidence.http_5xx = Math.min(999, evidence.http_5xx + 1);
+      }
+    });
     page.setDefaultTimeout(5000);
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i], started = Date.now();
@@ -111,6 +134,13 @@ async function runBrowserFlow(target, steps, allowlist) {
           duration_ms: Date.now() - started, detail });
       } catch (err) {
         const repair = await collectRepairSuggestion(page,s,i);
+        evidence.failed_step_index = i;
+        if (s.op.startsWith("assert_")) evidence.failure_kind = "assertion_mismatch";
+        else if (repair) evidence.failure_kind = "locator_rename_candidate";
+        else if (s.op === "click_role" || s.op === "fill_label")
+          evidence.failure_kind = "element_unavailable";
+        else if (s.op === "navigate") evidence.failure_kind = "navigation_failed";
+        else evidence.failure_kind = "browser_step_failed";
         checks.push({ name: stepName(i, s), status: "failed",
           duration_ms: Date.now() - started,
           detail: String(err.message || err).split("\n")[0].slice(0, 200),
@@ -124,13 +154,20 @@ async function runBrowserFlow(target, steps, allowlist) {
         if (png.length <= 1000000) screenshot = png.toString("base64");
       }
     } catch { /* screenshots are optional */ }
+    try {
+      const current = new URL(page.url());
+      if (current.origin === origin && safePath(current.pathname)) {
+        evidence.last_path = current.pathname;
+      }
+    } catch { /* skip path */ }
   } catch (err) {
+    evidence.failure_kind = "browser_initialization_failed";
     checks.push({ name: "Browser runner initialization", status: "failed",
       duration_ms: 0, detail: String(err.message || err).split("\n")[0].slice(0, 200) });
   } finally {
     if (context) await context.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
   }
-  return { checks, screenshot_base64: screenshot };
+  return { checks, screenshot_base64: screenshot, evidence };
 }
 module.exports = { safePath, validateFlow, runBrowserFlow };
