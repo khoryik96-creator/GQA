@@ -4,7 +4,7 @@ import (
  "context"
  "net/http"
  "net/http/httptest"
- "strings"
+ "encoding/json"
  "testing"
 )
 
@@ -69,7 +69,8 @@ func TestModelProviderJSONAndModelFailure(t *testing.T){
  server:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
   if r.Header.Get("Authorization")!="Bearer test-key"{t.Error("missing provider authorization")}
   w.Header().Set("Content-Type","application/json")
-  w.Write([]byte(`{"choices":[{"message":{"content":`+jsonQuote(raw)+`}}]}`))
+  encoded, _ := json.Marshal(raw)
+  w.Write([]byte(`{"choices":[{"message":{"content":`+string(encoded)+`}}]}`))
  }))
  defer server.Close()
  provider:=planningProvider{URL:server.URL,Key:"test-key",Model:"mock",Client:server.Client()}
@@ -84,14 +85,3 @@ func TestModelProviderJSONAndModelFailure(t *testing.T){
  if _,err:=provider.generate(context.Background(),input);err==nil{t.Fatal("503 should be an error")}
 }
 
-func jsonQuote(s string)string{
- var b strings.Builder
- b.WriteByte('"')
- for _,ch:=range s {
-  if ch=='"'||ch=='\'{b.WriteByte('\')}
-  if ch=='
-'{b.WriteString("\n")}else{b.WriteRune(ch)}
- }
- b.WriteByte('"')
- return b.String()
-}
