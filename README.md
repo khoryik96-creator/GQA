@@ -468,3 +468,85 @@ Before production use: move job creation to a separately controlled executor
 host or microVM service; use stronger network and identity isolation, a
 broker authorization model independent of the application runtime, strict
 secret handling, formal audit logs, per-tenant quotas and a security review.
+
+
+## v0.11 — Durable host-broker jobs, cancellation and restart recovery
+
+GQA's **optional, host-side disposable-container broker** now supports
+persisted, FIFO job scheduling and explicit cancellation. The default
+Compose runner is unchanged. This feature is **local developer tooling**
+and remains restricted to the two bundled demo fixtures.
+
+**What changed:**
+- Jobs have unique IDs and states: queued, running, cancelling, passed,
+  failed, cancelled, interrupted, or recovery_pending.
+- An atomic local journal at `.gqa-broker-state/jobs.json` records submitted
+  job specifications, state transitions, timestamps and failure summaries.
+  Only the last 100 completed jobs are retained. Screenshots, credentials
+  and result bodies are not copied into the journal.
+- A FIFO queue holds at most eight unfinished jobs, with one active
+  container at a time. The existing synchronous `/run` and `/flow` API
+  endpoints remain compatible and reject busy periods rather than
+  enqueuing an unexpectedly long wait.
+- A separate authenticated asynchronous `POST /jobs` endpoint returns a
+  job ID. `GET /jobs` and `GET /jobs/{id}` report metadata **without exposing
+  the job's test input**.
+- `POST /jobs/{id}/cancel` cancels queued work or asks the launcher to stop
+  an active container and reports cancellation as a failure, never success.
+- After a broker restart, **queued** jobs can resume in original order.
+  Jobs that were already running are *not* automatically replayed. The
+  broker first attempts cleanup by exact generated container ID; if
+  cleanup cannot be confirmed, startup fails closed rather than
+  launching more tests. Interrupted jobs remain in history.
+- The administrator-only Team Access page now has a **Disposable test
+  jobs** panel when the feature is enabled. It shows statuses, errors,
+  refresh and confirmation-based cancellation.
+
+The journal contains typed fixture test steps, which could include test
+email addresses or other sample field values. Do not use secrets, genuine
+personal information or production credentials in test input. The state
+directory is Git-ignored and local to your host machine; treat its backup
+and disk access as private.
+
+### Enable the administrator job monitor
+
+In addition to the existing v0.10 opt-in broker setup, include:
+
+```powershell
+$env:GQA_RUNNER_HOST = "host.docker.internal"
+$env:GQA_RUNNER_PORT = "18090"
+$env:GQA_JOB_MANAGEMENT_ENABLED = "true"
+docker compose up -d --no-deps --force-recreate api
+```
+
+Open **Team Access** as a global administrator to view and cancel jobs.
+The admin job proxy is **off by default** and accepts only a configured,
+exact `http://host.docker.internal:18090/run` runner target.
+A project owner or ordinary QA user cannot access this admin view.
+
+### Broker API (advanced, trusted local access only)
+
+The broker itself requires the internal `GQA_RUNNER_TOKEN` for all job
+management routes. `/healthz` is the only unauthenticated endpoint. The
+job API is not a public service and must be protected by a local firewall.
+
+- `POST /jobs` — add a validated fixture job with
+  `{"kind":"smoke","target_url":"http://fixture:8081","run_api":true,"run_web":false}`
+- `GET /jobs` — view recent durable job statuses.
+- `GET /jobs/{id}` — retrieve one persisted status.
+- `POST /jobs/{id}/cancel` — cancel a queued or running job.
+- `POST /run` and `POST /flow` — existing compatible synchronous actions.
+
+These endpoints are reachable only from explicitly authorized clients
+that possess the internal broker token. Do not paste that token into a
+browser or store it in project memory.
+
+### Remaining limits
+
+This is **not** a distributed queue, database-backed scheduler, per-tenant
+execution quota, detached cluster worker, or hardened sandbox. Host Docker
+CLI access is privileged. Docker containers still share the host kernel,
+and Chromium's sandbox remains disabled. In-flight jobs can finish before
+a cancellation reaches the container. Broker recovery and cleanup are
+best-effort across external Docker failures, and not every type of host
+crash can guarantee cleanup. Use only authorized local test fixtures.
