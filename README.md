@@ -372,3 +372,99 @@ invitations, MFA, passkeys, SSO, password-recovery emails, distributed login
 rate limiting, per-job VM/container isolation, or in-flight job cancellation.
 A test already running when an account is suspended could finish. Do not
 expose GQA publicly or allow untrusted applications into the browser worker.
+
+
+## v0.10 — Experimental disposable QA containers (opt-in)
+
+**New execution mode:** a host-side broker starts a **new restricted Docker
+container per approved test run**, collects the JSON checks and screenshot,
+and removes that container. It is **not enabled by default**. The earlier
+single-use Node process inside the Compose runner remains the default path,
+and all prior workflow and role restrictions still apply.
+
+The host broker runs **outside** Docker on your own development machine.
+Its Docker access comes from the host's installed Docker CLI. No GQA service
+or browser worker container has the Docker socket mounted. The broker accepts
+the same authenticated Go API requests and supports only the two controlled
+local fixtures, not arbitrary URLs.
+
+### What the new container is allowed to do
+
+- Run only the locally built `gqa-job:local` image (no image pull).
+- Join only the dedicated internal `gqa_qa_execution` Docker network, which
+  contains the two controlled fixtures but **not** the API, DB, or web app.
+- Use no host file or directory mounts, no published ports, no Docker socket,
+  and receive no administrator password, provider API key or runner token.
+- Drop all Linux capabilities, run as `pwuser`, use a read-only root
+  filesystem, no-new-privileges, a bounded temporary filesystem, and fixed
+  CPU, memory and process limits.
+- Execute only explicitly reviewed typed browser flows or fixed GET-based
+  API/browser smoke tests. The broker enforces one concurrent job, a runtime
+  deadline, and best-effort forced container cleanup.
+
+A result includes `evidence.worker_lifecycle=ephemeral_container` and a
+separate job identity. Browser Flow Studio labels the worker type.
+
+### Local Windows / PowerShell setup (experimental)
+
+Docker Desktop and Node.js 22+ must be installed. Keep this **on a trusted,
+firewalled development computer**; the host broker is not a public service.
+
+In PowerShell terminal A, from the repository directory:
+
+```powershell
+docker compose up --build -d
+$env:GQA_RUNNER_TOKEN = ((Get-Content .env |
+  Where-Object { $_ -match '^GQA_RUNNER_TOKEN=' }) -split '=',2)[1]
+$env:GQA_COMPOSE_PROJECT = "gqa"
+$env:GQA_HOST_BROKER_BIND = "0.0.0.0"
+node apps/host-broker/index.cjs
+```
+
+The `0.0.0.0` binding is sometimes required to let Docker Desktop containers
+reach the host. **Protect TCP port 18090 with your machine's firewall** so
+other LAN or internet devices cannot access it. The service requires the
+internal runner token for every test-execution request. If a host-only
+interface binding works on your machine, prefer it instead of `0.0.0.0`.
+
+In PowerShell terminal B, start the API with the opt-in target:
+
+```powershell
+$env:GQA_RUNNER_HOST = "host.docker.internal"
+$env:GQA_RUNNER_PORT = "18090"
+docker compose up -d --no-deps --force-recreate api
+```
+
+Now open `http://localhost:3000` and use the existing smoke or reviewed
+browser-flow actions. Test the built-in fixture `http://fixture:8081`.
+The host broker stays running only while terminal A is active.
+
+To return to the default in-container runner, stop terminal A and run:
+
+```powershell
+$env:GQA_RUNNER_HOST = "runner"
+$env:GQA_RUNNER_PORT = "8090"
+docker compose up -d --no-deps --force-recreate api
+```
+
+Changing the configured project name requires using the same value for
+`GQA_COMPOSE_PROJECT` in Compose and the host broker; the example uses `gqa`.
+
+### Tested security boundaries and remaining risks
+
+GitHub CI includes a dedicated experimental job that starts the host broker,
+runs a real Playwright and API test in separate disposable containers,
+confirms screenshots and run identities, and checks that no labelled test
+containers remain afterward. Runner commands and the target whitelist
+also have unit tests.
+
+**This is not a production multi-tenant sandbox.** A host broker that can
+run the Docker CLI has powerful local machine permissions. It must not be
+available to untrusted clients. Browser Chromium still has its own sandbox
+disabled, and Docker shares the host kernel. Active jobs may not terminate
+immediately on user revocation; no durable queue or strict quota exists.
+
+Before production use: move job creation to a separately controlled executor
+host or microVM service; use stronger network and identity isolation, a
+broker authorization model independent of the application runtime, strict
+secret handling, formal audit logs, per-tenant quotas and a security review.
