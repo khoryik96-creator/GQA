@@ -198,3 +198,28 @@ multi-tenant RBAC or a production security review.
 
 Only the API and web ports are bound to local loopback in Docker Compose.
 The internal runner remains on the Compose private network.
+
+### Restricted browser worker (v0.6)
+
+The Playwright runner and both controlled demo fixtures now reside on a
+dedicated Docker `internal: true` network. This prevents the browser worker
+from reaching arbitrary external services even if a page tries to bypass
+Playwright request routing. The Go API connects to both the application and
+test networks, allowing GitHub/approved model connectivity while communicating
+with the protected runner.
+
+The runner also uses a read-only root filesystem, a temporary writable
+`/tmp` mount, non-root user, dropped Linux capabilities, no-new-privileges,
+process/memory/CPU limits, per-run fresh browser processes and blocked WebSockets.
+The API-to-runner token is configured separately in `.env`.
+
+**External staging targets cannot be executed on the default private worker.**
+External target execution requires a future dedicated, egress-controlled runner
+pool and authorization policy. Do not bypass this restriction by attaching
+the worker to the host network or mounting the Docker socket.
+
+These are **defense-in-depth controls, not a complete browser sandbox**:
+Chromium's own sandbox is disabled in this early worker and a compromised
+browser process could still reach other containers on the private test network.
+Untrusted websites, customer data, public hosting, multi-admin RBAC and
+commercial deployment remain unsupported.
