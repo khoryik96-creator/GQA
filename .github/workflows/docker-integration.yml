@@ -149,7 +149,72 @@ jobs:
           with urllib.request.urlopen(BASE + f"/api/projects/{project_id}/runs") as response:
               historical = json.loads(response.read().decode("utf-8"))
           assert any(x.get("flow_id") == flow["id"] for x in historical)
-          print("PASS: memory-aware QA planning, real API/browser checks, screenshot, production block, typed browser flows and review digests")
+
+          # Simulate a UI rename without changing the business outcome.
+          broken = request(f"/api/projects/{project_id}/flows/{flow['id']}/execute", {
+              "target_url": "http://fixture-renamed:8081",
+              "acknowledged_digest": flow["digest"]
+          })
+          assert broken["status"] == "failed", broken
+          hints = [c["repair"] for c in broken["checks"] if c.get("repair")]
+          assert len(hints) == 1, broken
+          assert hints[0]["original_name"] == "Show details", hints
+          assert hints[0]["proposed_name"] == "Reveal details", hints
+
+          repair = request(f"/api/projects/{project_id}/flows/{flow['id']}/propose-repair", {
+              "failed_run_id": broken["id"]
+          })
+          assert repair["repaired_from_run_id"] == broken["id"], repair
+          assert repair["repair_target"] == "http://fixture-renamed:8081", repair
+          original_assertions = [x for x in flow["steps"] if x["op"].startswith("assert_")]
+          repaired_assertions = [x for x in repair["steps"] if x["op"].startswith("assert_")]
+          assert original_assertions == repaired_assertions, repair
+          assert repair["digest"] != flow["digest"], repair
+
+          try:
+              request(f"/api/projects/{project_id}/flows/{repair['id']}/execute", {
+                  "target_url": "http://fixture:8081",
+                  "acknowledged_digest": repair["digest"]
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 403, exc.code
+          else:
+              raise AssertionError("Repair replay was accepted against a different origin")
+
+          repaired_run = request(f"/api/projects/{project_id}/flows/{repair['id']}/execute", {
+              "target_url": "http://fixture-renamed:8081",
+              "acknowledged_digest": repair["digest"]
+          })
+          assert repaired_run["status"] == "passed", repaired_run
+          assert all(x["status"] == "passed" for x in repaired_run["checks"]), repaired_run
+
+          accepted = request(f"/api/projects/{project_id}/flows/{repair['id']}/confirm-repair", {
+              "successful_run_id": repaired_run["id"],
+              "app_revision": "fixture-renamed-v1"
+          })
+          assert accepted["memory_id"], accepted
+          assert accepted["old_name"] == "Show details", accepted
+          assert accepted["new_name"] == "Reveal details", accepted
+
+          with urllib.request.urlopen(BASE + f"/api/projects/{project_id}/repairs") as response:
+              lessons = json.loads(response.read().decode("utf-8"))
+          assert any(x["repaired_flow_id"] == repair["id"] for x in lessons), lessons
+
+          with urllib.request.urlopen(BASE + f"/api/projects/{project_id}/memories") as response:
+              memories = json.loads(response.read().decode("utf-8"))
+          assert any(x["id"] == accepted["memory_id"] and x["kind"] == "lesson"
+                     and x["status"] == "confirmed" for x in memories), memories
+
+          try:
+              request(f"/api/projects/{project_id}/flows/{repair['id']}/confirm-repair", {
+                  "successful_run_id": repaired_run["id"],
+                  "app_revision": "fixture-renamed-v1"
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 409
+          else:
+              raise AssertionError("Repair was accepted more than once")
+          print("PASS: memory-aware QA planning, real API/browser checks, screenshot, production block, typed browser flows, approved locator repair and persistent lesson")
           PY
 
       - name: Stack diagnostics on failure
