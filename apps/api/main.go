@@ -5,7 +5,7 @@ import (
   _ "embed"
   "encoding/json"
   "errors"
-  "fmt"
+  "io"
   "log"
   "net/http"
   "net/url"
@@ -121,10 +121,9 @@ func parseJSON(w http.ResponseWriter, r *http.Request, dest any) bool {
     return false
   }
   var extra any
-  if err := decoder.Decode(&extra); !errors.Is(err, context.Canceled) {
-    // The second decode must reach EOF; otherwise there is trailing data.
-    if err == nil { fail(w, 400, "Multiple JSON values are not allowed"); return false }
-    if err.Error() != "EOF" { fail(w, 400, "Trailing invalid JSON data"); return false }
+  if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+    fail(w, 400, "Unexpected trailing JSON data")
+    return false
   }
   return true
 }
@@ -324,5 +323,3 @@ func (s *server) plans(w http.ResponseWriter, r *http.Request) {
   writeJSON(w,201,plan)
 }
 
-// Compile-time check that accidental unused imports are caught by CI.
-var _ = fmt.Sprintf
