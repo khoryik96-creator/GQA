@@ -14,29 +14,43 @@ import (
  "time"
 
  "github.com/jackc/pgx/v5/pgxpool"
+ "golang.org/x/crypto/bcrypt"
 )
 
-// GQA v0.6 uses a single local administrator, not a multi-tenant identity system.
-// No credential material or raw session tokens are stored in PostgreSQL.
 const (
  sessionCookieName = "gqa_session"
- sessionLifetime   = 12 * time.Hour
+ sessionLifetime = 12 * time.Hour
  failedLoginWindow = 15 * time.Minute
- maxLoginFailures  = 5
+ maxLoginFailures = 5
+ bootstrapEmail = "admin@gqa.local"
 )
 
 type authContextKey struct{}
+type Account struct {
+ ID string `json:"id"`
+ Email string `json:"email"`
+ GlobalRole string `json:"global_role"`
+}
+type authenticatedSession struct {
+ Account Account
+ Expires time.Time
+}
+func currentAccount(r *http.Request)(Account,bool){
+ session,ok:=r.Context().Value(authContextKey{}).(authenticatedSession)
+ return session.Account,ok
+}
 
 type authenticator struct {
  db *pgxpool.Pool
- passwordDigest [32]byte
+ bootstrapPassword string
+ dummyHash []byte
  allowedOrigin string
  secureCookie bool
  mu sync.Mutex
  failures map[string][]time.Time
 }
 
-func newAuthenticator(db *pgxpool.Pool, password, allowedOrigin string, secure bool) (*authenticator,error) {
+func newAuthenticator(db *pgxpool.Pool,password,allowedOrigin string,secure bool)(*authenticator,error){
  if len(password)<16 || len(password)>256 {
   return nil,errors.New("GQA_ADMIN_PASSWORD must contain 16-256 characters; configure it in your local .env")
  }
@@ -44,40 +58,52 @@ func newAuthenticator(db *pgxpool.Pool, password, allowedOrigin string, secure b
   !strings.HasPrefix(allowedOrigin,"https://") {
   return nil,errors.New("ALLOWED_ORIGIN must be a trusted local or HTTPS frontend origin")
  }
+ dummy,err:=bcrypt.GenerateFromPassword([]byte("invalid-gqa-user-password-sentinel"),bcrypt.DefaultCost)
+ if err!=nil{return nil,err}
  return &authenticator{
-  db:db,passwordDigest:sha256.Sum256([]byte(password)),
+  db:db,bootstrapPassword:password,dummyHash:dummy,
   allowedOrigin:allowedOrigin,secureCookie:secure,
   failures:make(map[string][]time.Time),
  },nil
 }
 
-func (a *authenticator) validOrigin(origin string) bool {
+// Bootstrap only if this installation has no accounts. Existing users and
+// passwords are NOT silently overwritten on container restarts.
+func (a *authenticator) bootstrap(ctx context.Context) error{
+ var exists bool
+ if err:=a.db.QueryRow(ctx,"SELECT EXISTS (SELECT 1 FROM gqa_users)").Scan(&exists);err!=nil{return err}
+ if exists{return nil}
+ hashed,err:=bcrypt.GenerateFromPassword([]byte(a.bootstrapPassword),bcrypt.DefaultCost)
+ if err!=nil{return err}
+ _,err=a.db.Exec(ctx,`
+  INSERT INTO gqa_users(email,password_hash,global_role)
+  VALUES($1,$2,'admin') ON CONFLICT DO NOTHING`,bootstrapEmail,string(hashed))
+ return err
+}
+
+func (a *authenticator) validOrigin(origin string)bool{
  return origin!="" && origin==a.allowedOrigin
 }
-
-func clientIP(r *http.Request) string {
+func clientIP(r *http.Request)string{
  host,_,err:=net.SplitHostPort(r.RemoteAddr)
- if err!=nil {return r.RemoteAddr}
- return host // Never trust X-Forwarded-For on a direct local listener.
+ if err!=nil{return r.RemoteAddr}
+ return host
 }
-
-func (a *authenticator) mayAttemptLogin(ip string) bool {
+func (a *authenticator) mayAttemptLogin(ip string)bool{
  a.mu.Lock();defer a.mu.Unlock()
  now:=time.Now()
  recent:=make([]time.Time,0,maxLoginFailures)
- for _,when:=range a.failures[ip] {
+ for _,when:=range a.failures[ip]{
   if now.Sub(when)<failedLoginWindow{recent=append(recent,when)}
  }
  if len(recent)==0{delete(a.failures,ip)}else{a.failures[ip]=recent}
  return len(recent)<maxLoginFailures
 }
-
-func (a *authenticator) recordLoginFailure(ip string) {
+func (a *authenticator) recordLoginFailure(ip string){
  a.mu.Lock();defer a.mu.Unlock()
  a.failures[ip]=append(a.failures[ip],time.Now())
 }
-
-func (a *authenticator) clearFailures(ip string) {
+func (a *authenticator) clearFailures(ip string){
  a.mu.Lock();defer a.mu.Unlock()
  delete(a.failures,ip)
 }
@@ -91,17 +117,19 @@ func sessionDigest(r *http.Request)([]byte,error){
  digest:=sha256.Sum256(raw)
  return digest[:],nil
 }
-
-func (a *authenticator) sessionExpires(ctx context.Context,r *http.Request)(time.Time,error){
+func (a *authenticator) sessionIdentity(ctx context.Context,r *http.Request)(authenticatedSession,error){
  digest,err:=sessionDigest(r)
- if err!=nil{return time.Time{},err}
- var expires time.Time
+ if err!=nil{return authenticatedSession{},err}
+ var identity authenticatedSession
  err=a.db.QueryRow(ctx,`
-  SELECT expires_at FROM auth_sessions
-  WHERE token_digest=$1::bytea AND revoked_at IS NULL AND expires_at>now()`,digest).Scan(&expires)
- return expires,err
+  SELECT s.expires_at,u.id::text,u.email,u.global_role
+  FROM auth_sessions s
+  JOIN gqa_users u ON u.id=s.user_id
+  WHERE s.token_digest=$1::bytea AND s.revoked_at IS NULL
+  AND s.expires_at>now() AND u.active=true`,digest).
+  Scan(&identity.Expires,&identity.Account.ID,&identity.Account.Email,&identity.Account.GlobalRole)
+ return identity,err
 }
-
 func (a *authenticator) cookie(w http.ResponseWriter,value string,maxAge int){
  http.SetCookie(w,&http.Cookie{
   Name:sessionCookieName,Value:value,Path:"/api",HttpOnly:true,
@@ -109,7 +137,6 @@ func (a *authenticator) cookie(w http.ResponseWriter,value string,maxAge int){
   MaxAge:maxAge,Expires:time.Now().Add(time.Duration(maxAge)*time.Second),
  })
 }
-
 func (a *authenticator) login(w http.ResponseWriter,r *http.Request){
  ip:=clientIP(r)
  if !a.mayAttemptLogin(ip){
@@ -117,36 +144,49 @@ func (a *authenticator) login(w http.ResponseWriter,r *http.Request){
   fail(w,http.StatusTooManyRequests,"Too many login attempts. Try again later.")
   return
  }
- var input struct{Password string `json:"password"`}
+ var input struct{
+  Email string `json:"email"`
+  Password string `json:"password"`
+ }
  if !parseJSON(w,r,&input){return}
- if len(input.Password)>256{fail(w,http.StatusBadRequest,"Invalid login request");return}
- candidate:=sha256.Sum256([]byte(input.Password))
- if subtle.ConstantTimeCompare(candidate[:],a.passwordDigest[:])!=1{
+ // Legacy local clients that supplied only an administrator password
+ // continue to work; the UI always sends an explicit account email.
+ input.Email=normalizeEmail(input.Email)
+ if input.Email==""{input.Email=bootstrapEmail}
+ if len(input.Password)>256{fail(w,400,"Invalid login request");return}
+ var account Account
+ var passwordHash string
+ err:=a.db.QueryRow(r.Context(),`
+  SELECT id::text,email,global_role,password_hash FROM gqa_users
+  WHERE email=$1 AND active=true`,input.Email).
+  Scan(&account.ID,&account.Email,&account.GlobalRole,&passwordHash)
+ hash:=a.dummyHash
+ if err==nil{hash=[]byte(passwordHash)}
+ validPassword:=bcrypt.CompareHashAndPassword(hash,[]byte(input.Password))==nil
+ if err!=nil||!validPassword{
   a.recordLoginFailure(ip)
-  fail(w,http.StatusUnauthorized,"Invalid administrator password")
+  fail(w,401,"Invalid account credentials")
   return
  }
  raw:=make([]byte,32)
  if _,err:=rand.Read(raw);err!=nil{fail(w,500,"Unable to initialize session");return}
  hashed:=sha256.Sum256(raw)
  expires:=time.Now().UTC().Add(sessionLifetime)
- _,err:=a.db.Exec(r.Context(),`
-  INSERT INTO auth_sessions(token_digest,expires_at) VALUES($1::bytea,$2)`,
-  hashed[:],expires)
+ _,err=a.db.Exec(r.Context(),`
+  INSERT INTO auth_sessions(token_digest,user_id,expires_at)
+  VALUES($1::bytea,$2::uuid,$3)`,hashed[:],account.ID,expires)
  if err!=nil{fail(w,500,"Unable to save session");return}
  a.clearFailures(ip)
  a.cookie(w,hex.EncodeToString(raw),int(sessionLifetime.Seconds()))
- writeJSON(w,http.StatusOK,map[string]any{"authenticated":true,"expires_at":expires})
+ writeJSON(w,200,map[string]any{"authenticated":true,"expires_at":expires,"user":account})
 }
-
 func (a *authenticator) session(w http.ResponseWriter,r *http.Request){
- expiry,ok:=r.Context().Value(authContextKey{}).(time.Time)
- if !ok {fail(w,401,"Not authenticated");return}
- writeJSON(w,http.StatusOK,map[string]any{
-  "authenticated":true,"expires_at":expiry,
+ identity,ok:=r.Context().Value(authContextKey{}).(authenticatedSession)
+ if !ok{fail(w,401,"Not authenticated");return}
+ writeJSON(w,200,map[string]any{
+  "authenticated":true,"expires_at":identity.Expires,"user":identity.Account,
  })
 }
-
 func (a *authenticator) logout(w http.ResponseWriter,r *http.Request){
  digest,err:=sessionDigest(r)
  if err==nil{
@@ -160,28 +200,28 @@ func (a *authenticator) logout(w http.ResponseWriter,r *http.Request){
  w.WriteHeader(http.StatusNoContent)
 }
 
-// Guard the entire /api namespace, not individual handlers.
-// Exact Origin is required for all writes, including login and logout.
-// Read-only health checks stay public for Docker diagnostics.
+// Check current session and user status on EVERY API call, so revocations,
+// account suspension, and role changes are effective without re-login.
 func (a *authenticator) enforce(next http.Handler)http.Handler{
  return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
   if r.Method==http.MethodOptions{
    next.ServeHTTP(w,r);return
   }
-  if r.Method!=http.MethodGet&&r.Method!=http.MethodHead{
-   if !a.validOrigin(r.Header.Get("Origin")){
-    fail(w,http.StatusForbidden,"Request origin is not authorized");return
-   }
+  if r.Method!=http.MethodGet&&r.Method!=http.MethodHead &&
+    !a.validOrigin(r.Header.Get("Origin")){
+   fail(w,http.StatusForbidden,"Request origin is not authorized");return
   }
   if strings.HasPrefix(r.URL.Path,"/api/") &&
      r.URL.Path!="/api/auth/login"{
-    expires,err:=a.sessionExpires(r.Context(),r)
-    if err!=nil{
-     fail(w,http.StatusUnauthorized,"Administrator login required");return
-    }
-    r=r.WithContext(context.WithValue(r.Context(),authContextKey{},expires))
+   session,err:=a.sessionIdentity(r.Context(),r)
+   if err!=nil{
+    fail(w,http.StatusUnauthorized,"Account login required");return
+   }
+   r=r.WithContext(context.WithValue(r.Context(),authContextKey{},session))
   }
   next.ServeHTTP(w,r)
  })
 }
 
+// This helper is kept simple: passwords are never stored in the clear.
+var _=subtle.ConstantTimeCompare
