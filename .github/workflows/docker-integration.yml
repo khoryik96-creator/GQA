@@ -10,6 +10,10 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Generate isolated CI credentials
+        run: |
+          printf 'GQA_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" > .env
+          printf 'GQA_RUNNER_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
       - name: Build and start local stack
         run: docker compose up --build -d
 
@@ -20,8 +24,14 @@ jobs:
           import time
           import urllib.request
           import urllib.error
+          import http.cookiejar
 
           BASE = "http://127.0.0.1:8080"
+          FRONTEND_ORIGIN = "http://localhost:3000"
+          cookies = http.cookiejar.CookieJar()
+          urllib.request.install_opener(urllib.request.build_opener(
+              urllib.request.HTTPCookieProcessor(cookies)
+          ))
           for attempt in range(90):
               try:
                   with urllib.request.urlopen(BASE + "/healthz", timeout=2) as response:
@@ -32,13 +42,38 @@ jobs:
           else:
               raise AssertionError("Go API did not become ready")
 
+          # The full QA API is private until a local administrator signs in.
+          try:
+              urllib.request.urlopen(BASE + "/api/projects", timeout=4)
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 401
+          else:
+              raise AssertionError("Anonymous project access unexpectedly succeeded")
+
+          with open(".env", encoding="utf-8") as env_file:
+              admin_password = next(line.split("=", 1)[1].strip()
+                  for line in env_file if line.startswith("GQA_ADMIN_PASSWORD="))
+          login = urllib.request.Request(
+              BASE + "/api/auth/login",
+              data=json.dumps({"password": admin_password}).encode("utf-8"),
+              method="POST",
+              headers={"Content-Type": "application/json", "Origin": FRONTEND_ORIGIN},
+          )
+          with urllib.request.urlopen(login, timeout=8) as response:
+              session = json.loads(response.read().decode("utf-8"))
+              assert session["authenticated"] is True
+              assert "HttpOnly" in response.headers["Set-Cookie"]
+              assert "SameSite=Strict" in response.headers["Set-Cookie"]
+          with urllib.request.urlopen(BASE + "/api/auth/session") as response:
+              assert json.load(response)["authenticated"] is True
+
           def request(path, payload):
               body = json.dumps(payload).encode("utf-8")
               req = urllib.request.Request(
                   BASE + path,
                   data=body,
                   method="POST",
-                  headers={"Content-Type": "application/json"},
+                  headers={"Content-Type": "application/json", "Origin": FRONTEND_ORIGIN},
               )
               with urllib.request.urlopen(req, timeout=60) as resp:
                   return json.loads(resp.read().decode("utf-8"))
@@ -214,7 +249,34 @@ jobs:
               assert exc.code == 409
           else:
               raise AssertionError("Repair was accepted more than once")
-          print("PASS: memory-aware QA planning, real API/browser checks, screenshot, production block, typed browser flows, approved locator repair and persistent lesson")
+          # Reject authenticated cross-origin writes even with a valid cookie.
+          forged = urllib.request.Request(
+              BASE + f"/api/projects/{project_id}/memories",
+              data=json.dumps({"kind": "lesson", "content": "Injected content"}).encode("utf-8"),
+              method="POST",
+              headers={"Content-Type": "application/json", "Origin": "http://evil.example"},
+          )
+          try:
+              urllib.request.urlopen(forged, timeout=5)
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 403
+          else:
+              raise AssertionError("Unauthorized write origin was accepted")
+
+          logout = urllib.request.Request(
+              BASE + "/api/auth/logout", data=b"{}", method="POST",
+              headers={"Content-Type": "application/json", "Origin": FRONTEND_ORIGIN},
+          )
+          with urllib.request.urlopen(logout, timeout=5) as response:
+              assert response.status == 204
+          try:
+              urllib.request.urlopen(BASE + "/api/projects", timeout=5)
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 401
+          else:
+              raise AssertionError("Logout did not revoke the administrator session")
+
+          print("PASS: memory-aware QA planning, real API/browser checks, screenshot, production block, typed browser flows, reviewable repairs, admin login, CSRF checks and logout")
           PY
 
       - name: Stack diagnostics on failure
@@ -223,4 +285,6 @@ jobs:
 
       - name: Stop stack
         if: always()
-        run: docker compose down -v
+        run: |
+          docker compose down -v
+          rm -f .env
