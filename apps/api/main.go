@@ -70,7 +70,7 @@ func main() {
   if err != nil { log.Fatal(err) }
   defer db.Close()
   if err = db.Ping(ctx); err != nil { log.Fatal("database: ", err) }
-  if _, err = db.Exec(ctx, schema); err != nil { log.Fatal("migrate schema: ", err) }
+  if _, err = db.Exec(ctx, schema, pgx.QueryExecModeSimpleProtocol); err != nil { log.Fatal("migrate schema: ", err) }
   s := &server{db: db}
   mux := http.NewServeMux()
   mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
