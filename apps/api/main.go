@@ -75,7 +75,18 @@ func main() {
   if err = db.Ping(ctx); err != nil { log.Fatal("database: ", err) }
   if _, err = db.Exec(ctx, schema, pgx.QueryExecModeSimpleProtocol); err != nil { log.Fatal("migrate schema: ", err) }
   s := &server{db: db}
+  origin := os.Getenv("ALLOWED_ORIGIN")
+  if origin == "" { origin = "http://localhost:3000" }
+  auth,err:=newAuthenticator(db,os.Getenv("GQA_ADMIN_PASSWORD"),origin,
+    os.Getenv("GQA_COOKIE_SECURE")=="true")
+  if err!=nil{log.Fatal("authentication setup: ",err)}
+  if len(os.Getenv("GQA_RUNNER_TOKEN"))<24 {
+    log.Fatal("GQA_RUNNER_TOKEN must be a 24+ character secret in local .env")
+  }
   mux := http.NewServeMux()
+  mux.HandleFunc("POST /api/auth/login",auth.login)
+  mux.HandleFunc("GET /api/auth/session",auth.session)
+  mux.HandleFunc("POST /api/auth/logout",auth.logout)
   mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
     writeJSON(w, 200, map[string]string{"status":"ok"})
   })
@@ -99,19 +110,27 @@ func main() {
   mux.HandleFunc("OPTIONS /", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
   port := os.Getenv("PORT")
   if port == "" { port = "8080" }
-  origin := os.Getenv("ALLOWED_ORIGIN")
-  if origin == "" { origin = "http://localhost:3000" }
   log.Printf("GQA API listening on :%s", port)
-  log.Fatal(http.ListenAndServe(":"+port, cors(mux, origin)))
+  httpServer:=&http.Server{
+    Addr:":"+port,Handler:cors(auth.enforce(mux),origin),
+    ReadHeaderTimeout:5*time.Second,IdleTimeout:60*time.Second,
+  }
+  log.Fatal(httpServer.ListenAndServe())
 }
 
 func cors(next http.Handler, origin string) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    w.Header().Set("Access-Control-Allow-Origin", origin)
-    w.Header().Set("Vary", "Origin")
-    w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-    w.Header().Set("X-Content-Type-Options", "nosniff")
+    if r.Header.Get("Origin")==origin {
+      w.Header().Set("Access-Control-Allow-Origin",origin)
+      w.Header().Set("Access-Control-Allow-Credentials","true")
+    }
+    w.Header().Set("Vary","Origin")
+    w.Header().Set("Access-Control-Allow-Methods","GET, POST, OPTIONS")
+    w.Header().Set("Access-Control-Allow-Headers","Content-Type")
+    w.Header().Set("X-Content-Type-Options","nosniff")
+    w.Header().Set("X-Frame-Options","DENY")
+    w.Header().Set("Referrer-Policy","no-referrer")
+    w.Header().Set("Cache-Control","no-store")
     next.ServeHTTP(w, r)
   })
 }

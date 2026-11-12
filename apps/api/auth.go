@@ -9,7 +9,6 @@ import (
  "errors"
  "net"
  "net/http"
- "os"
  "strings"
  "sync"
  "time"
@@ -186,4 +185,3 @@ func (a *authenticator) enforce(next http.Handler)http.Handler{
  })
 }
 
-var _ = os.Getenv

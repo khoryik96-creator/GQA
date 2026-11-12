@@ -166,3 +166,35 @@ modify other tests.
 
 v0.6 should add robust auth and per-run isolation before expanding autonomy,
 alongside optional semantic/visual assertions and trace-based failure analysis.
+
+## v0.6 — Local administrator access
+
+**Breaking local startup change:** the API now rejects startup without an
+administrator password and a separate internal runner token. Configure once:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Edit `.env` and replace **both** example placeholders with unique, random,
+secret strings. The administrator password must be 16–256 characters and the
+runner token at least 24 characters. The `.env` file is ignored by Git.
+Then run `docker compose up --build` and open http://localhost:3000.
+
+The web dashboard displays an administrator login screen. API operations
+(including screenshots, memory, plans and test execution) require a
+session cookie issued after successful login.
+
+Sessions are valid for up to 12 hours, are invalidated on logout and are
+stored as hashed random tokens. Cookies are HttpOnly, SameSite Strict,
+and scoped to `/api`. All state-changing API calls require an exact
+approved frontend Origin header. Authentication is rate-limited per
+direct source IP for repeated failures.
+
+For a TLS-reverse-proxied deployment, set `GQA_COOKIE_SECURE=true` and
+provide an HTTPS `ALLOWED_ORIGIN`, but **do not publicly deploy this build**.
+It is a **single-administrator local prototype**, not multi-user SSO,
+multi-tenant RBAC or a production security review.
+
+Only the API and web ports are bound to local loopback in Docker Compose.
+The internal runner remains on the Compose private network.

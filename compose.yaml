@@ -19,9 +19,11 @@ services:
       DATABASE_URL: postgres://gqa:gqa_local_only@db:5432/gqa?sslmode=disable
       PORT: "8080"
       ALLOWED_ORIGIN: http://localhost:3000
+      GQA_ADMIN_PASSWORD: ${GQA_ADMIN_PASSWORD:?Set GQA_ADMIN_PASSWORD in .env}
+      GQA_COOKIE_SECURE: ${GQA_COOKIE_SECURE:-false}
       GQA_RUNNER_URL: http://runner:8090/run
       GQA_RUNNER_FLOW_URL: http://runner:8090/flow
-      GQA_RUNNER_TOKEN: gqa_local_dev_runner_token_only
+      GQA_RUNNER_TOKEN: ${GQA_RUNNER_TOKEN:?Set GQA_RUNNER_TOKEN in .env}
       GQA_SMOKE_TARGETS: http://fixture:8081,http://fixture-renamed:8081
       GQA_EVIDENCE_DIR: /evidence
       GQA_LLM_CHAT_COMPLETIONS_URL: ${GQA_LLM_CHAT_COMPLETIONS_URL:-}
@@ -44,7 +46,7 @@ services:
     build: ./apps/runner
     init: true
     environment:
-      GQA_RUNNER_TOKEN: gqa_local_dev_runner_token_only
+      GQA_RUNNER_TOKEN: ${GQA_RUNNER_TOKEN:?Set GQA_RUNNER_TOKEN in .env}
       GQA_SMOKE_TARGETS: http://fixture:8081,http://fixture-renamed:8081
     depends_on:
       fixture:

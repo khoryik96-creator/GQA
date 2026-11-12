@@ -121,3 +121,14 @@ CREATE TABLE IF NOT EXISTS browser_locator_cache (
 );
 CREATE INDEX IF NOT EXISTS browser_locator_cache_expiration
 ON browser_locator_cache(expires_at);
+
+-- Local-only administrator sessions. Only SHA-256 digests of random tokens
+-- are stored, and every authenticated API request checks expiration/revocation.
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  token_digest BYTEA PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS auth_sessions_active_expiry ON auth_sessions(expires_at)
+WHERE revoked_at IS NULL;
