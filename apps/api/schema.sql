@@ -170,3 +170,18 @@ CREATE TABLE IF NOT EXISTS project_access_audit (
  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS project_access_audit_project ON project_access_audit(project_id,created_at DESC);
+
+-- v0.9 security events are attributed to actor and target and contain no
+-- plaintext passwords, tokens or arbitrary user-supplied descriptions.
+CREATE TABLE IF NOT EXISTS account_security_audit (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ actor_id UUID NOT NULL REFERENCES gqa_users(id),
+ subject_id UUID NOT NULL REFERENCES gqa_users(id),
+ action TEXT NOT NULL CHECK (action IN
+  ('password_change','admin_password_reset','account_suspended','account_reactivated')),
+ reason TEXT NOT NULL CHECK (reason IN
+  ('self_service','account_recovery','security_review','team_change','access_cleanup')),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS account_security_audit_recent
+ ON account_security_audit(created_at DESC);

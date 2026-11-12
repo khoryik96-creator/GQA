@@ -89,6 +89,8 @@ func main() {
   mux.HandleFunc("POST /api/auth/login",auth.login)
   mux.HandleFunc("GET /api/auth/session",auth.session)
   mux.HandleFunc("POST /api/auth/logout",auth.logout)
+  mux.HandleFunc("POST /api/auth/password",s.changePassword)
+  mux.HandleFunc("POST /api/auth/revoke-sessions",s.revokeMySessions)
   mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
     writeJSON(w, 200, map[string]string{"status":"ok"})
   })
@@ -111,6 +113,9 @@ func main() {
   mux.HandleFunc("GET /api/runs/{id}/screenshot", auth.screenshot(s.screenshot))
   mux.HandleFunc("GET /api/admin/users",auth.admin(s.users))
   mux.HandleFunc("POST /api/admin/users",auth.admin(s.users))
+  mux.HandleFunc("POST /api/admin/users/{userId}/reset-password",auth.admin(s.adminResetPassword))
+  mux.HandleFunc("POST /api/admin/users/{userId}/status",auth.admin(s.adminSetUserStatus))
+  mux.HandleFunc("GET /api/admin/security-audit",auth.admin(s.accountSecurityAudit))
   mux.HandleFunc("GET /api/projects/{id}/members",auth.project("manage",s.projectMembers))
   mux.HandleFunc("POST /api/projects/{id}/members",auth.project("manage",s.projectMembers))
   mux.HandleFunc("DELETE /api/projects/{id}/members/{userId}",auth.project("manage",s.removeProjectMember))
