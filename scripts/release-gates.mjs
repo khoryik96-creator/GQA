@@ -35,11 +35,14 @@ check(/"run","--rm","--pull","never"/.test(runner) &&
       /"--cap-drop","ALL"/.test(runner) &&
       /"--network",project\+"_qa_execution"/.test(runner),
  "disposable jobs use fixed no-pull image and constrained network");
-check(/"http:\/\/fixture:8081,http:\/\/fixture-renamed:8081"/.test(broker),
- "optional broker accepts only bundled fixture targets");
-check(/validStoredSpec\(j\.spec\)/.test(gate) &&
-      /this\.store\.recoverable/.test(read("apps/host-broker/scheduler.cjs")),
- "journal is validated before restart replay and interruption reconciliation");
+check(/const FIXTURES="http:\/\/fixture:8081,http:\/\/fixture-renamed:8081"/.test(runner) &&
+      /jobFromInput\(kind,input\)/.test(broker) &&
+      /allowedTarget\(input.target_url,FIXTURES\)/.test(broker),
+ "optional broker independently checks the built-in fixture allowlist");
+check(/validStoredJob\(j\)/.test(gate) &&
+      /validStoredSpec\(spec\)/.test(gate) &&
+      /this\.store\.recoverable\(\)/.test(read("apps/host-broker/scheduler.cjs")),
+ "journal validates stored job specs before replay and interrupted-job cleanup");
 check(/sessionIdentity/.test(auth) && /validOrigin/.test(auth),
  "Go API includes authenticated sessions and write-origin checks");
 check(/allowedProject/.test(rbac) && /canAccess/.test(rbac),
