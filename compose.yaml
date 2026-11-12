@@ -15,6 +15,8 @@ services:
 
   api:
     build: ./apps/api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - default
       - qa_private
@@ -28,8 +30,8 @@ services:
       ALLOWED_ORIGIN: http://localhost:3000
       GQA_ADMIN_PASSWORD: ${GQA_ADMIN_PASSWORD:?Set GQA_ADMIN_PASSWORD in .env}
       GQA_COOKIE_SECURE: ${GQA_COOKIE_SECURE:-false}
-      GQA_RUNNER_URL: http://runner:8090/run
-      GQA_RUNNER_FLOW_URL: http://runner:8090/flow
+      GQA_RUNNER_URL: http://${GQA_RUNNER_HOST:-runner}:${GQA_RUNNER_PORT:-8090}/run
+      GQA_RUNNER_FLOW_URL: http://${GQA_RUNNER_HOST:-runner}:${GQA_RUNNER_PORT:-8090}/flow
       GQA_RUNNER_TOKEN: ${GQA_RUNNER_TOKEN:?Set GQA_RUNNER_TOKEN in .env}
       GQA_SMOKE_TARGETS: http://fixture:8081,http://fixture-renamed:8081
       GQA_EVIDENCE_DIR: /evidence
@@ -50,6 +52,7 @@ services:
         condition: service_healthy
 
   runner:
+    image: gqa-job:local
     build: ./apps/runner
     networks:
       - qa_private
@@ -83,6 +86,7 @@ services:
     build: ./apps/fixture
     networks:
       - qa_private
+      - qa_execution
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8081/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 5s
@@ -93,6 +97,7 @@ services:
     build: ./apps/fixture
     networks:
       - qa_private
+      - qa_execution
     environment:
       GQA_FIXTURE_DETAIL_LABEL: Reveal details
     healthcheck:
@@ -121,4 +126,10 @@ volumes:
 # The API uses both networks because it needs GitHub and approved LLM access.
 networks:
   qa_private:
+    internal: true
+
+  # Only controlled demo fixtures join this container-only network.
+  # The API, database, and long-lived runner do not participate.
+  qa_execution:
+    name: ${GQA_COMPOSE_PROJECT:-gqa}_qa_execution
     internal: true

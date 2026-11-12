@@ -22,3 +22,13 @@ func TestEvidenceSanitization(t *testing.T) {
  passed:=cleanRunEvidence(valid,"passed")
  if passed.FailureKind!="none"||passed.FailedStepIndex!=nil{t.Fatal("passing result kept a failure classification")}
 }
+
+func TestEphemeralContainerEvidence(t *testing.T) {
+ e:=cleanRunEvidence(RunEvidence{
+  JobID:"632d90ca-d098-48c2-89a2-1993860d706e",
+  WorkerLifecycle:"ephemeral_container",FailureKind:"none",
+ },"passed")
+ if e.WorkerLifecycle!="ephemeral_container" || e.FailureKind!="none"{
+  t.Fatalf("Container evidence lost: %#v",e)
+ }
+}

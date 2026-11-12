@@ -8,6 +8,7 @@ COPY browser-flow.cjs ./browser-flow.cjs
 COPY repair-hints.cjs ./repair-hints.cjs
 COPY smoke-runner.cjs ./smoke-runner.cjs
 COPY job-worker.cjs ./job-worker.cjs
+COPY container-job.cjs ./container-job.cjs
 COPY job-supervisor.cjs ./job-supervisor.cjs
 USER pwuser
 ENV PORT=8090

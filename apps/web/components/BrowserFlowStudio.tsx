@@ -247,7 +247,10 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
             <strong>Execution diagnostics</strong>
             <div className="browser-evidence-grid">
               <span>Failure category <b>{(latestRun.evidence.failure_kind || "unknown").replaceAll("_"," ")}</b></span>
-              <span>Worker lifetime <b>{latestRun.evidence.worker_lifecycle === "single_job_process" ? "One short-lived process" : "Legacy / unverified"}</b></span>
+              <span>Worker lifetime <b>{latestRun.evidence.worker_lifecycle === "ephemeral_container"
+                ? "Disposable Docker container"
+                : latestRun.evidence.worker_lifecycle === "single_job_process"
+                ? "One short-lived process" : "Legacy / unverified"}</b></span>
               <span>Browser console errors <b>{latestRun.evidence.console_errors ?? 0}</b></span>
               <span>Uncaught page exceptions <b>{latestRun.evidence.page_exceptions ?? 0}</b></span>
               <span>Failed network requests <b>{latestRun.evidence.failed_requests ?? 0}</b></span>

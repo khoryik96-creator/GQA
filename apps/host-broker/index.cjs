@@ -49,7 +49,8 @@ const server=http.createServer((req,res)=>{
     const job={kind,target_url:input.target_url,
       ...(kind==="flow"?{steps:input.steps}:{run_api:input.run_api,run_web:input.run_web})};
     running=true;
-    try{send(res,200,await executeJob(job,{project:PROJECT}))}
+    try{send(res,200,await executeJob(job,{project:PROJECT,
+      timeoutMs:kind==="smoke"?24000:55000}))}
     finally{running=false}
   });
 });

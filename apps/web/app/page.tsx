@@ -467,7 +467,10 @@ export default function CommandCenter() {
                       {latestRun && <div className="run-result">
                         <div className="run-heading"><strong>Latest run · {when(latestRun.started_at)}</strong><span className={"pill " + (latestRun.status === "passed" ? "" : "warning")}>{latestRun.status}</span></div>
                         {latestRun.evidence && <p className="fine-print">
-                          Worker: {latestRun.evidence.worker_lifecycle === "single_job_process" ? "new process for this run" : "legacy"}
+                          Worker: {latestRun.evidence.worker_lifecycle === "ephemeral_container" ?
+                            "disposable Docker container" :
+                            latestRun.evidence.worker_lifecycle === "single_job_process" ?
+                            "new process for this run" : "legacy"}
                           {latestRun.evidence.failure_kind && " · Result category: " + latestRun.evidence.failure_kind.replaceAll("_", " ")}
                         </p>}
                         {latestRun.checks.map((check, index) => <div className="check-row" key={index}>

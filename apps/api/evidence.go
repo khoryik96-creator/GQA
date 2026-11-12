@@ -30,7 +30,9 @@ func cleanRunEvidence(raw RunEvidence, status string) RunEvidence {
   }
   if !isOneOf(raw.FailureKind,allowedFailure...){raw.FailureKind="unknown"}
   if !uuidRE.MatchString(raw.JobID){raw.JobID=""}
-  if raw.WorkerLifecycle!="single_job_process"{raw.WorkerLifecycle="unverified"}
+  if raw.WorkerLifecycle!="single_job_process" && raw.WorkerLifecycle!="ephemeral_container" {
+    raw.WorkerLifecycle="unverified"
+  }
   if raw.FailedStepIndex!=nil && (*raw.FailedStepIndex<0||*raw.FailedStepIndex>7){
     raw.FailedStepIndex=nil
   }
