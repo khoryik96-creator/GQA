@@ -35,6 +35,7 @@ type TestRun struct{
   TargetURL string `json:"target_url"`
   Status string `json:"status"`
   Checks []SmokeCheck `json:"checks"`
+  Evidence RunEvidence `json:"evidence"`
   ScreenshotAvailable bool `json:"screenshot_available"`
   StartedAt time.Time `json:"started_at"`
   FinishedAt *time.Time `json:"finished_at"`
@@ -42,6 +43,7 @@ type TestRun struct{
 
 type workerReply struct {
   Checks []SmokeCheck `json:"checks"`
+  Evidence RunEvidence `json:"evidence"`
   ScreenshotBase64 string `json:"screenshot_base64"`
 }
 
@@ -70,18 +72,19 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   if r.Method==http.MethodGet {
     rows,err:=s.db.Query(r.Context(),`
       SELECT id::text,project_id::text,plan_id::text,target_url,status,checks,started_at,finished_at,
-      screenshot_available,COALESCE(flow_id::text,''),execution_kind
+      screenshot_available,COALESCE(flow_id::text,''),execution_kind,evidence
       FROM test_runs WHERE project_id=$1::uuid ORDER BY started_at DESC LIMIT 30`,id)
     if err!=nil{fail(w,500,"Unable to retrieve runs");return}
     defer rows.Close()
     runs:=[]TestRun{}
     for rows.Next(){
       var run TestRun
-      var raw []byte
-      if err:=rows.Scan(&run.ID,&run.ProjectID,&run.PlanID,&run.TargetURL,&run.Status,&raw,&run.StartedAt,&run.FinishedAt,&run.ScreenshotAvailable,&run.FlowID,&run.ExecutionKind);err!=nil{
+      var raw, evidenceJSON []byte
+      if err:=rows.Scan(&run.ID,&run.ProjectID,&run.PlanID,&run.TargetURL,&run.Status,&raw,&run.StartedAt,&run.FinishedAt,&run.ScreenshotAvailable,&run.FlowID,&run.ExecutionKind,&evidenceJSON);err!=nil{
         fail(w,500,"Unable to read runs");return
       }
-      if err:=json.Unmarshal(raw,&run.Checks);err!=nil{fail(w,500,"Invalid run evidence");return}
+      if err:=json.Unmarshal(raw,&run.Checks);err!=nil{fail(w,500,"Invalid run checks");return}
+      if err:=json.Unmarshal(evidenceJSON,&run.Evidence);err!=nil{fail(w,500,"Invalid run diagnostics");return}
       runs=append(runs,run)
     }
     if rows.Err()!=nil{fail(w,500,"Unable to read runs");return}
@@ -157,6 +160,7 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   if len(run.Checks)==0{run.Checks=[]SmokeCheck{{Name:"Runner evidence",Status:"failed",Detail:"Runner produced no checks"}}}
   run.Status="passed"
   for _,check:=range run.Checks{if check.Status!="passed"{run.Status="failed";break}}
+  run.Evidence=cleanRunEvidence(reply.Evidence,run.Status)
 
   if reply.ScreenshotBase64!="" && len(reply.ScreenshotBase64)<1500000{
     if raw,err:=base64.StdEncoding.DecodeString(reply.ScreenshotBase64);err==nil && len(raw)>8 &&
@@ -171,10 +175,11 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
     }
   }
   resultJSON,_:=json.Marshal(run.Checks)
+  evidenceJSON,_:=json.Marshal(run.Evidence)
   err=s.db.QueryRow(r.Context(),`
     UPDATE test_runs SET checks=$2::jsonb,status=$3,screenshot_available=$4,
-    finished_at=now() WHERE id=$1::uuid RETURNING finished_at`,
-    run.ID,string(resultJSON),run.Status,run.ScreenshotAvailable).Scan(&run.FinishedAt)
+    evidence=$5::jsonb,finished_at=now() WHERE id=$1::uuid RETURNING finished_at`,
+    run.ID,string(resultJSON),run.Status,run.ScreenshotAvailable,string(evidenceJSON)).Scan(&run.FinishedAt)
   if err!=nil{fail(w,500,"Run completed but could not save results");return}
   writeJSON(w,201,run)
 }

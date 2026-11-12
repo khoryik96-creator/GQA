@@ -117,6 +117,7 @@ func persistFlowEvidence(ctx context.Context,db *server,run *TestRun,reply worke
   }
   run.Status="passed"
   for _,check:=range run.Checks{if check.Status!="passed"{run.Status="failed";break}}
+  run.Evidence=cleanRunEvidence(reply.Evidence,run.Status)
   if reply.ScreenshotBase64!=""&&len(reply.ScreenshotBase64)<1500000{
     if raw,err:=base64.StdEncoding.DecodeString(reply.ScreenshotBase64);err==nil&&len(raw)>8&&
       bytes.Equal(raw[:8],[]byte{0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a}){
@@ -128,10 +129,12 @@ func persistFlowEvidence(ctx context.Context,db *server,run *TestRun,reply worke
     }
   }
   raw,_:=json.Marshal(run.Checks)
+  diagnostics,_:=json.Marshal(run.Evidence)
   return db.db.QueryRow(ctx,`
-    UPDATE test_runs SET checks=$2::jsonb,status=$3,screenshot_available=$4,finished_at=now()
+    UPDATE test_runs SET checks=$2::jsonb,status=$3,screenshot_available=$4,
+    evidence=$5::jsonb,finished_at=now()
     WHERE id=$1::uuid RETURNING finished_at`,
-    run.ID,string(raw),run.Status,run.ScreenshotAvailable).Scan(&run.FinishedAt)
+    run.ID,string(raw),run.Status,run.ScreenshotAvailable,string(diagnostics)).Scan(&run.FinishedAt)
 }
 
 func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){

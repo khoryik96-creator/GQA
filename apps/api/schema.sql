@@ -132,3 +132,6 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );
 CREATE INDEX IF NOT EXISTS auth_sessions_active_expiry ON auth_sessions(expires_at)
 WHERE revoked_at IS NULL;
+
+-- v0.7: bounded, redacted per-run diagnostic summary.
+ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '{}'::jsonb;
