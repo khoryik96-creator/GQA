@@ -1,5 +1,4 @@
 "use strict";
-const { chromium } = require("playwright");
 const { allowedTarget } = require("./policy.cjs");
 const ROLES = new Set(["button", "link", "heading", "textbox"]);
 const OPS = new Set(["navigate", "click_role", "fill_label", "assert_text", "assert_visible_role", "assert_url_path"]);
@@ -51,6 +50,7 @@ async function runBrowserFlow(target, steps, allowlist) {
   const checks = [];
   let screenshot = "", browser, context;
   try {
+    const { chromium } = require("playwright");
     browser = await chromium.launch({ headless: true, chromiumSandbox: false });
     context = await browser.newContext({
       viewport: { width: 1280, height: 800 }, serviceWorkers: "block",
