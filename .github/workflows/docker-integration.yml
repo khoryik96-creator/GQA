@@ -1,0 +1,103 @@
+name: GQA Docker Integration
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start local stack
+        run: docker compose up --build -d
+
+      - name: Verify memory-aware planning and real smoke checks
+        run: |
+          python3 - <<'PY'
+          import json
+          import time
+          import urllib.request
+          import urllib.error
+
+          BASE = "http://127.0.0.1:8080"
+          for attempt in range(90):
+              try:
+                  with urllib.request.urlopen(BASE + "/healthz", timeout=2) as response:
+                      if response.status == 200:
+                          break
+              except Exception:
+                  time.sleep(2)
+          else:
+              raise AssertionError("Go API did not become ready")
+
+          def request(path, payload):
+              body = json.dumps(payload).encode("utf-8")
+              req = urllib.request.Request(
+                  BASE + path,
+                  data=body,
+                  method="POST",
+                  headers={"Content-Type": "application/json"},
+              )
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  return json.loads(resp.read().decode("utf-8"))
+
+          project = request("/api/projects", {
+              "name": "GQA CI Fixture",
+              "repo_url": "https://github.com/khoryik96-creator/GQA",
+              "app_type": "fullstack",
+              "stack": "TypeScript, Go"
+          })
+          project_id = project["id"]
+          memory = request(f"/api/projects/{project_id}/memories", {
+              "kind": "requirement",
+              "content": "Every user login must have an authorization API regression check"
+          })
+          plan = request(f"/api/projects/{project_id}/plans", {
+              "prompt": "Verify the application homepage and API health using read-only smoke checks",
+              "environment": "local"
+          })
+          assert memory["id"] in [m["id"] for m in plan["consulted_memories"]], plan
+          assert {"web", "api"}.issubset({a["id"] for a in plan["selected_agents"]}), plan
+          assert plan["approval_required"] is False, plan
+          run = request(f"/api/projects/{project_id}/runs", {
+              "plan_id": plan["id"],
+              "target_url": "http://fixture:8081"
+          })
+          assert run["status"] == "passed", run
+          assert {x["name"] for x in run["checks"]} == {
+              "API GET /healthz", "Browser homepage smoke"
+          }, run
+          assert all(x["status"] == "passed" for x in run["checks"]), run
+          assert run["screenshot_available"], run
+
+          screenshot = urllib.request.urlopen(
+              BASE + "/api/runs/" + run["id"] + "/screenshot", timeout=10
+          ).read()
+          assert screenshot[:8] == b"\x89PNG\r\n\x1a\n", "Screenshot is not PNG"
+
+          production_plan = request(f"/api/projects/{project_id}/plans", {
+              "prompt": "Test API and login regression with safe smoke checks",
+              "environment": "production"
+          })
+          assert production_plan["approval_required"] is True
+          try:
+              request(f"/api/projects/{project_id}/runs", {
+                  "plan_id": production_plan["id"],
+                  "target_url": "http://fixture:8081"
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 403, exc.code
+          else:
+              raise AssertionError("Production plan unexpectedly executable")
+          print("PASS: memory-aware QA planning, real API/browser checks, screenshot, production block")
+          PY
+
+      - name: Stack diagnostics on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 120
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
