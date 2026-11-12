@@ -69,6 +69,7 @@ async function runSmoke(target, runAPI, runWeb) {
         } catch { /* abort below */ }
         return route.abort();
       });
+      await context.routeWebSocket("**/*", socket => socket.close());
       const page = await context.newPage();
       const response = await page.goto(origin, { timeout: 10000, waitUntil: "domcontentloaded" });
       const title = (await page.title()).trim().slice(0, 180);

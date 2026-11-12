@@ -15,6 +15,10 @@ services:
 
   api:
     build: ./apps/api
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       DATABASE_URL: postgres://gqa:gqa_local_only@db:5432/gqa?sslmode=disable
       PORT: "8080"
@@ -45,6 +49,17 @@ services:
   runner:
     build: ./apps/runner
     init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
+    shm_size: 256mb
     environment:
       GQA_RUNNER_TOKEN: ${GQA_RUNNER_TOKEN:?Set GQA_RUNNER_TOKEN in .env}
       GQA_SMOKE_TARGETS: http://fixture:8081,http://fixture-renamed:8081

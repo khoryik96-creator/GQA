@@ -66,6 +66,9 @@ async function runBrowserFlow(target, steps, allowlist) {
       } catch { /* block below */ }
       return route.abort();
     });
+    // Route WebSockets as well as HTTP; pages must not establish arbitrary
+    // bidirectional connections outside the controlled browser test.
+    await context.routeWebSocket("**/*", socket => socket.close());
     const page = await context.newPage();
     page.setDefaultTimeout(5000);
     for (let i = 0; i < steps.length; i++) {
