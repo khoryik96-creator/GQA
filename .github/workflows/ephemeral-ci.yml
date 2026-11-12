@@ -47,6 +47,7 @@ jobs:
       - name: Connect local API to host broker
         run: |
           GQA_RUNNER_HOST=host.docker.internal GQA_RUNNER_PORT=18090 \
+            GQA_JOB_MANAGEMENT_ENABLED=true \
             docker compose up -d --no-deps --force-recreate api
       - name: Run real ephemeral browser and API jobs
         run: |
@@ -118,8 +119,73 @@ jobs:
               saved=json.load(response)
           assert any(v["id"]==second["id"] and
               v["evidence"]["worker_lifecycle"]=="ephemeral_container" for v in saved)
-          print("PASS: separate disposable containers, real checks and persisted evidence")
+          with urllib.request.urlopen(BASE+"/api/admin/broker-jobs") as response:
+              broker_jobs=json.load(response)
+          assert len(broker_jobs)>=2, broker_jobs
+          assert all(j["status"]=="passed" for j in broker_jobs), broker_jobs
+          assert all("spec" not in j and "target_url" not in j for j in broker_jobs)
+          print("PASS: separate disposable containers, persisted evidence and admin job monitoring")
           PY
+      - name: Verify durable asynchronous queue and restart recovery
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request, urllib.error, os
+
+          BASE="http://127.0.0.1:18090"
+          with open(".env",encoding="utf-8") as f:
+              token=next(row.split("=",1)[1].strip() for row in f
+                         if row.startswith("GQA_RUNNER_TOKEN="))
+          def call(path,data=None):
+              req=urllib.request.Request(BASE+path,method="POST" if data is not None else "GET",
+                  data=json.dumps(data).encode() if data is not None else None,
+                  headers={"X-GQA-Runner-Token":token,"Content-Type":"application/json"})
+              with urllib.request.urlopen(req,timeout=65) as res:
+                  return res.status,json.load(res)
+
+          with urllib.request.urlopen(BASE+"/healthz",timeout=5) as res:
+              assert json.load(res)["mode"]=="ephemeral_container"
+          try:
+              urllib.request.urlopen(BASE+"/jobs",timeout=5)
+          except urllib.error.HTTPError as exc:
+              assert exc.code==401
+          else:
+              raise AssertionError("Broker job status was anonymously accessible")
+
+          status,queued=call("/jobs",{
+              "kind":"smoke","target_url":"http://fixture:8081",
+              "run_api":True,"run_web":False})
+          assert status==202 and queued["id"],queued
+          for _ in range(60):
+              _,tracked=call("/jobs/"+queued["id"])
+              if tracked["status"] in ("passed","failed","cancelled","interrupted"):break
+              time.sleep(0.5)
+          else:
+              raise AssertionError("Asynchronous job never reached terminal status")
+          assert tracked["status"]=="passed",tracked
+          assert tracked["check_count"]>=1,tracked
+
+          assert os.path.isfile(".gqa-broker-state/jobs.json")
+          with open(".gqa-broker-state/jobs.json",encoding="utf-8") as f:
+              journal=json.load(f)
+          assert any(j["id"]==queued["id"] and j["status"]=="passed" for j in journal)
+          print("PASS: async queue, durable on-disk journal and authenticated job status")
+          PY
+          # Restart the host process and prove the completed job remains recorded.
+          kill "$(cat /tmp/gqa-host-broker.pid)"
+          sleep 2
+          set -a
+          . ./.env
+          set +a
+          export GQA_HOST_BROKER_BIND=0.0.0.0
+          node apps/host-broker/index.cjs >>/tmp/gqa-host-broker.log 2>&1 &
+          echo $! >/tmp/gqa-host-broker.pid
+          for n in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18090/healthz >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(python3 -c 'import json; x=json.load(open(".gqa-broker-state/jobs.json")); print(any(j["status"]=="passed" for j in x))')" = "True"
       - name: Confirm no disposable job containers remain
         run: |
           if test -n "$(docker ps -aq --filter 'label=com.gqa.component=ephemeral-job')"; then
