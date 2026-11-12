@@ -1,7 +1,6 @@
 package main
 
 import (
- "context"
  "encoding/json"
  "errors"
  "fmt"
@@ -150,11 +149,10 @@ func (s *server) confirmRepair(w http.ResponseWriter,r *http.Request){
  defer tx.Rollback(r.Context())
  var sourceFlowID,failedRunID,targetURL,oldDigest,newDigest,originalStatus,successStatus,successTarget string
  var sourceJSON,repairedJSON,failedChecks []byte
- var srcProjectID string
  err=tx.QueryRow(r.Context(),`
   SELECT old.id::text,r.repaired_from_run_id::text,r.repair_target,
          old.digest,r.digest,old.steps,r.steps,failed.checks,
-         failed.status,passed.status,passed.target_url,old.project_id::text
+         failed.status,passed.status,passed.target_url
   FROM browser_flows r
   JOIN browser_flows old ON old.id=r.repaired_from_flow_id AND old.project_id=r.project_id
   JOIN test_runs failed ON failed.id=r.repaired_from_run_id AND failed.flow_id=old.id
@@ -162,7 +160,7 @@ func (s *server) confirmRepair(w http.ResponseWriter,r *http.Request){
   WHERE r.id=$1::uuid AND r.project_id=$2::uuid AND passed.project_id=r.project_id`,
   flowID,projectID,input.SuccessfulRunID).
   Scan(&sourceFlowID,&failedRunID,&targetURL,&oldDigest,&newDigest,&sourceJSON,&repairedJSON,&failedChecks,
-   &originalStatus,&successStatus,&successTarget,&srcProjectID)
+   &originalStatus,&successStatus,&successTarget)
  if errors.Is(err,pgx.ErrNoRows){fail(w,404,"No matching verified replay or repair lineage");return}
  if err!=nil{fail(w,500,"Unable to inspect repair history");return}
  if originalStatus!="failed"||successStatus!="passed"||successTarget!=targetURL{

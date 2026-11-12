@@ -82,3 +82,42 @@ CREATE TABLE IF NOT EXISTS browser_flows (
 CREATE INDEX IF NOT EXISTS browser_flows_project_created ON browser_flows(project_id,created_at DESC);
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS flow_id UUID REFERENCES browser_flows(id);
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS execution_kind TEXT NOT NULL DEFAULT 'smoke';
+
+-- Immutable evidence-based browser repair lineage and reviewed lessons.
+ALTER TABLE browser_flows ADD COLUMN IF NOT EXISTS repaired_from_flow_id UUID REFERENCES browser_flows(id);
+ALTER TABLE browser_flows ADD COLUMN IF NOT EXISTS repaired_from_run_id UUID REFERENCES test_runs(id);
+ALTER TABLE browser_flows ADD COLUMN IF NOT EXISTS repair_target TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS browser_flow_one_repair_per_failure
+ON browser_flows(repaired_from_run_id) WHERE repaired_from_run_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS repair_acceptances (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ original_flow_id UUID NOT NULL REFERENCES browser_flows(id),
+ repaired_flow_id UUID NOT NULL UNIQUE REFERENCES browser_flows(id),
+ original_failure_run_id UUID NOT NULL REFERENCES test_runs(id),
+ verified_run_id UUID NOT NULL UNIQUE REFERENCES test_runs(id),
+ app_revision TEXT NOT NULL,
+ target_url TEXT NOT NULL,
+ step_index INTEGER NOT NULL,
+ old_name TEXT NOT NULL,
+ new_name TEXT NOT NULL,
+ memory_id UUID NOT NULL REFERENCES memories(id),
+ accepted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS repair_acceptances_project_date
+ON repair_acceptances(project_id,accepted_at DESC);
+
+CREATE TABLE IF NOT EXISTS browser_locator_cache (
+ project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ original_flow_digest CHAR(64) NOT NULL,
+ target_origin TEXT NOT NULL,
+ app_revision TEXT NOT NULL,
+ step_index INTEGER NOT NULL,
+ proposed_name TEXT NOT NULL,
+ verified_flow_id UUID NOT NULL REFERENCES browser_flows(id),
+ expires_at TIMESTAMPTZ NOT NULL,
+ PRIMARY KEY(project_id,original_flow_digest,target_origin,app_revision,step_index)
+);
+CREATE INDEX IF NOT EXISTS browser_locator_cache_expiration
+ON browser_locator_cache(expires_at);

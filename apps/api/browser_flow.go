@@ -28,6 +28,9 @@ type BrowserFlow struct {
   Digest         string          `json:"digest"`
   GenerationMode string          `json:"generation_mode"`
   Warning        string          `json:"warning"`
+  RepairSourceFlowID string      `json:"repaired_from_flow_id,omitempty"`
+  RepairSourceRunID string       `json:"repaired_from_run_id,omitempty"`
+  RepairTarget string            `json:"repair_target,omitempty"`
   CreatedAt      time.Time       `json:"created_at"`
 }
 
@@ -36,7 +39,8 @@ func (s *server) browserFlows(w http.ResponseWriter,r *http.Request){
   if !ok{return}
   if r.Method==http.MethodGet{
     rows,err:=s.db.Query(r.Context(),`
-      SELECT id::text,project_id::text,plan_id::text,prompt,objective,steps,digest,generation_mode,warning,created_at
+      SELECT id::text,project_id::text,plan_id::text,prompt,objective,steps,digest,generation_mode,warning,
+        COALESCE(repaired_from_flow_id::text,''),COALESCE(repaired_from_run_id::text,''),repair_target,created_at
       FROM browser_flows WHERE project_id=$1::uuid ORDER BY created_at DESC LIMIT 30`,projectID)
     if err!=nil{fail(w,500,"Unable to list browser flows");return}
     defer rows.Close()
@@ -45,7 +49,8 @@ func (s *server) browserFlows(w http.ResponseWriter,r *http.Request){
       var flow BrowserFlow
       var stepsJSON []byte
       if err:=rows.Scan(&flow.ID,&flow.ProjectID,&flow.PlanID,&flow.Prompt,
-          &flow.Objective,&stepsJSON,&flow.Digest,&flow.GenerationMode,&flow.Warning,&flow.CreatedAt);err!=nil{
+          &flow.Objective,&stepsJSON,&flow.Digest,&flow.GenerationMode,&flow.Warning,
+          &flow.RepairSourceFlowID,&flow.RepairSourceRunID,&flow.RepairTarget,&flow.CreatedAt);err!=nil{
         fail(w,500,"Unable to read browser flow");return
       }
       if err:=json.Unmarshal(stepsJSON,&flow.Steps);err!=nil{fail(w,500,"Invalid saved browser flow");return}
@@ -145,20 +150,28 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
   if !allowedSmokeTarget(input.TargetURL,allowed){
     fail(w,403,"Browser execution target is not in the approved allowlist");return
   }
+  canonicalInput,_:=canonicalTarget(input.TargetURL)
+  input.TargetURL=canonicalInput
   var flow BrowserFlow
   var stepsRaw,agentRaw []byte
   var approval bool
   var environment string
   err:=s.db.QueryRow(r.Context(),`
-    SELECT f.plan_id::text,f.steps,f.digest,p.approval_required,q.environment,p.selected_agents
+    SELECT f.plan_id::text,f.steps,f.digest,p.approval_required,q.environment,p.selected_agents,f.repair_target
     FROM browser_flows f JOIN plans p ON p.id=f.plan_id
     JOIN qa_requests q ON q.id=p.request_id
     WHERE f.id=$1::uuid AND f.project_id=$2::uuid`,
-    flowID,projectID).Scan(&flow.PlanID,&stepsRaw,&flow.Digest,&approval,&environment,&agentRaw)
+    flowID,projectID).Scan(&flow.PlanID,&stepsRaw,&flow.Digest,&approval,&environment,&agentRaw,&flow.RepairTarget)
   if errors.Is(err,pgx.ErrNoRows){fail(w,404,"Browser flow not found");return}
   if err!=nil{fail(w,500,"Unable to load browser flow");return}
   if approval || environment=="production"{
     fail(w,403,"Production/high-impact plans cannot execute browser actions");return
+  }
+  if flow.RepairTarget!="" {
+    originalTarget,err:=canonicalTarget(flow.RepairTarget)
+    if err!=nil || originalTarget!=input.TargetURL {
+      fail(w,403,"Repaired flows can only be replayed against the originally failing test target");return
+    }
   }
   if len(input.AcknowledgedDigest)!=64 ||
     subtle.ConstantTimeCompare([]byte(input.AcknowledgedDigest),[]byte(flow.Digest))!=1{
