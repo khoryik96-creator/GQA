@@ -87,6 +87,8 @@ jobs:
                   headers={"Content-Type": "application/json", "Origin": FRONTEND_ORIGIN},
               )
               with urllib.request.urlopen(req, timeout=60) as resp:
+                  if resp.status == 204:
+                      return None
                   return json.loads(resp.read().decode("utf-8"))
 
           project = request("/api/projects", {
@@ -391,6 +393,69 @@ jobs:
               audit = json.load(resp)
           assert any(a["action"]=="revoke"
                      and a["subject_email"]=="review.ci@example.test" for a in audit)
+          # v0.9: account suspension immediately revokes all sessions.
+          qa_second = login_as("qa.ci@example.test", "qa-safely-generated-test-password-01")
+          suspended = request(f"/api/admin/users/{qa_user['id']}/status", {
+              "active": False, "reason": "security_review"
+          })
+          assert suspended["active"] is False, suspended
+          should_deny(qa_opener, "/api/projects", code=401)
+          should_deny(qa_second, "/api/projects", code=401)
+          try:
+              login_as("qa.ci@example.test", "qa-safely-generated-test-password-01")
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 401
+          else:
+              raise AssertionError("Suspended user could log in")
+          reactivated = request(f"/api/admin/users/{qa_user['id']}/status", {
+              "active": True, "reason": "account_recovery"
+          })
+          assert reactivated["active"] is True, reactivated
+
+          # The user changes their own password; every old session is revoked.
+          qa_after_reactivation = login_as(
+              "qa.ci@example.test", "qa-safely-generated-test-password-01")
+          rotation = as_user(qa_after_reactivation, "/api/auth/password", {
+              "current_password": "qa-safely-generated-test-password-01",
+              "new_password": "qa-new-password-for-ci-validation-02"
+          }, method="POST")
+          assert rotation is None
+          should_deny(qa_after_reactivation, "/api/projects", code=401)
+          try:
+              login_as("qa.ci@example.test", "qa-safely-generated-test-password-01")
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 401
+          else:
+              raise AssertionError("Old password remained usable after rotation")
+          qa_rotated = login_as(
+              "qa.ci@example.test", "qa-new-password-for-ci-validation-02")
+          assert as_user(qa_rotated,"/api/projects")[0]["id"] == project_id
+
+          # A global administrator can recover a member's account.
+          reset = request(f"/api/admin/users/{qa_user['id']}/reset-password", {
+              "new_password": "qa-recovered-unique-password-for-ci-03"
+          })
+          assert reset is None
+          should_deny(qa_rotated, "/api/projects", code=401)
+          qa_recovered = login_as(
+              "qa.ci@example.test", "qa-recovered-unique-password-for-ci-03")
+          assert as_user(qa_recovered, "/api/projects")[0]["id"] == project_id
+
+          # Self-service global logout must revoke every device.
+          qa_extra = login_as(
+              "qa.ci@example.test", "qa-recovered-unique-password-for-ci-03")
+          assert as_user(qa_recovered, "/api/auth/revoke-sessions", {}, method="POST") is None
+          should_deny(qa_recovered, "/api/projects", code=401)
+          should_deny(qa_extra, "/api/projects", code=401)
+
+          with urllib.request.urlopen(BASE+"/api/admin/security-audit") as response:
+              security_events = json.load(response)
+          kinds = [e["action"] for e in security_events]
+          assert set(["account_suspended","account_reactivated",
+              "password_change","admin_password_reset"]).issubset(set(kinds))
+          assert all("password_hash" not in e and "new_password" not in e
+                     for e in security_events)
+
           # Reject authenticated cross-origin writes even with a valid cookie.
           forged = urllib.request.Request(
               BASE + f"/api/projects/{project_id}/memories",
