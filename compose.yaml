@@ -24,7 +24,7 @@ services:
       PGPASSWORD: ${GQA_DB_ADMIN_PASSWORD:?Set GQA_DB_ADMIN_PASSWORD to the existing PostgreSQL bootstrap password or a new random secret for fresh installs}
       GQA_DB_APP_PASSWORD: ${GQA_DB_APP_PASSWORD:?Set GQA_DB_APP_PASSWORD in .env}
     volumes:
-      - ./apps/api/schema.sql:/migrations/schema.sql:ro
+      - ./db-migrate/versions:/migrations/versions:ro
       - ./db-migrate/roles.sql:/migrations/roles.sql:ro
       - ./db-migrate/migrate.sh:/migrations/migrate.sh:ro
     entrypoint: ["sh","/migrations/migrate.sh"]
