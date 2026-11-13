@@ -12,9 +12,12 @@ import (
  "sync"
  "time"
 
+ "github.com/jackc/pgx/v5"
  "github.com/jackc/pgx/v5/pgxpool"
  "golang.org/x/crypto/bcrypt"
 )
+
+var errInvalidSessionToken = errors.New("invalid session token")
 
 const (
  sessionCookieName = "gqa_session"
@@ -154,9 +157,9 @@ func (a *authenticator) clearFailures(ip string){
 func sessionDigest(r *http.Request)([]byte,error){
  cookie,err:=r.Cookie(sessionCookieName)
  if err!=nil{return nil,err}
- if len(cookie.Value)!=64{return nil,errors.New("invalid session token size")}
+ if len(cookie.Value)!=64{return nil,errInvalidSessionToken}
  raw,err:=hex.DecodeString(cookie.Value)
- if err!=nil||len(raw)!=32{return nil,errors.New("invalid session token")}
+ if err!=nil||len(raw)!=32{return nil,errInvalidSessionToken}
  digest:=sha256.Sum256(raw)
  return digest[:],nil
 }
@@ -258,7 +261,14 @@ func (a *authenticator) enforce(next http.Handler)http.Handler{
      r.URL.Path!="/api/auth/login"{
    session,err:=a.sessionIdentity(r.Context(),r)
    if err!=nil{
-    fail(w,http.StatusUnauthorized,"Account login required");return
+    // A PostgreSQL outage is not a revoked or expired session. Reporting 401
+    // would cause clients to discard a valid credential during a brief DB
+    // interruption; preserve the session and signal a retryable outage.
+    if errors.Is(err,http.ErrNoCookie)||errors.Is(err,errInvalidSessionToken)||errors.Is(err,pgx.ErrNoRows){
+      fail(w,http.StatusUnauthorized,"Account login required");return
+    }
+    w.Header().Set("Retry-After","3")
+    fail(w,http.StatusServiceUnavailable,"Authentication service temporarily unavailable");return
    }
    r=r.WithContext(context.WithValue(r.Context(),authContextKey{},session))
   }
