@@ -32,6 +32,7 @@ type RepairReview struct {
  OldName string `json:"old_name"`
  NewName string `json:"new_name"`
  AppRevision string `json:"app_revision"`
+ RevisionProvenance string `json:"revision_provenance"`
  MemoryID string `json:"memory_id"`
  AcceptedAt time.Time `json:"accepted_at"`
 }
@@ -181,7 +182,7 @@ func (s *server) confirmRepair(w http.ResponseWriter,r *http.Request){
  err=tx.QueryRow(r.Context(),"SELECT id::text FROM repair_acceptances WHERE repaired_flow_id=$1::uuid",flowID).Scan(&existingID)
  if err==nil{fail(w,409,"Repair has already been accepted");return}
  if !errors.Is(err,pgx.ErrNoRows){fail(w,500,"Unable to check repair acceptance");return}
- note:=fmt.Sprintf("Validated UI locator correction for revision %s at authorized target %s: in browser step %d, the %s accessible name changed from %q to %q. Original test assertions passed after a separately reviewed replay. This is a version-scoped testing lesson, not a change to product requirements.",
+ note:=fmt.Sprintf("Validated UI locator correction for user-declared revision %s at authorized target %s: in browser step %d, the %s accessible name changed from %q to %q. Original test assertions passed after a separately reviewed replay. This is a version-scoped testing lesson, not a change to product requirements.",
   input.Revision,targetURL,hint.StepIndex+1,hint.Role,hint.OriginalName,hint.ProposedName)
  var memoryID string
  err=tx.QueryRow(r.Context(),`
@@ -193,7 +194,7 @@ func (s *server) confirmRepair(w http.ResponseWriter,r *http.Request){
  accepted=RepairReview{
   RepairedFlowID:flowID,RepairedFromFlowID:sourceFlowID,OriginalFailureRunID:failedRunID,
   TargetURL:targetURL,OldName:hint.OriginalName,NewName:hint.ProposedName,
-  AppRevision:input.Revision,MemoryID:memoryID,
+  AppRevision:input.Revision,RevisionProvenance:"user_declared",MemoryID:memoryID,
  }
  approver,_:=currentAccount(r)
  err=tx.QueryRow(r.Context(),`
@@ -224,7 +225,7 @@ func (s *server) reviewedRepairs(w http.ResponseWriter,r *http.Request){
  projectID,ok:=validProjectID(w,r);if !ok{return}
  rows,err:=s.db.Query(r.Context(),`
  SELECT repaired_flow_id::text,original_flow_id::text,original_failure_run_id::text,
-        target_url,old_name,new_name,app_revision,memory_id::text,accepted_at
+        target_url,old_name,new_name,app_revision,revision_provenance,memory_id::text,accepted_at
  FROM repair_acceptances WHERE project_id=$1::uuid ORDER BY accepted_at DESC LIMIT 50`,
  projectID)
  if err!=nil{fail(w,500,"Unable to retrieve repair lessons");return}
@@ -233,7 +234,7 @@ func (s *server) reviewedRepairs(w http.ResponseWriter,r *http.Request){
  for rows.Next(){
   var review RepairReview
   if err:=rows.Scan(&review.RepairedFlowID,&review.RepairedFromFlowID,&review.OriginalFailureRunID,
-    &review.TargetURL,&review.OldName,&review.NewName,&review.AppRevision,&review.MemoryID,&review.AcceptedAt);err!=nil{
+    &review.TargetURL,&review.OldName,&review.NewName,&review.AppRevision,&review.RevisionProvenance,&review.MemoryID,&review.AcceptedAt);err!=nil{
    fail(w,500,"Unable to decode repair lessons");return
   }
   reviews=append(reviews,review)

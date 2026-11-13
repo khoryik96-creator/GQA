@@ -193,3 +193,7 @@ ALTER TABLE memories ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES gqa_use
 ALTER TABLE repair_acceptances ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES gqa_users(id);
 CREATE INDEX IF NOT EXISTS test_runs_quality_recent ON test_runs(project_id,started_at DESC,id DESC)
  WHERE status IN ('passed','failed');
+
+-- A manually typed build revision must never be reported as attested.
+ALTER TABLE repair_acceptances ADD COLUMN IF NOT EXISTS revision_provenance TEXT NOT NULL
+ DEFAULT 'user_declared' CHECK (revision_provenance IN ('user_declared','build_attested'));
