@@ -1,0 +1,57 @@
+name: GQA Isolated API Load and Database Recovery
+
+on:
+  pull_request:
+    paths:
+      - "scripts/api_load_recovery.py"
+      - ".github/workflows/api-load-recovery.yml"
+      - "apps/api/**"
+      - "compose.yaml"
+      - "db-migrate/**"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/api_load_recovery.py"
+      - ".github/workflows/api-load-recovery.yml"
+      - "apps/api/**"
+      - "compose.yaml"
+      - "db-migrate/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-load-and-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GQA_ISOLATED_LOAD_TEST: "YES"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate disposable database and authentication secrets
+        run: |
+          printf 'GQA_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" > .env
+          printf 'GQA_RUNNER_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+          printf 'GQA_DB_APP_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> .env
+          printf 'GQA_DB_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> .env
+      - name: Start isolated, loopback-bound QA fixture stack
+        run: docker compose up --build -d
+      - name: Run bounded concurrent reads and authenticated DB interruption/recovery
+        run: python3 scripts/api_load_recovery.py
+      - name: Upload latency samples and error summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gqa-api-concurrency-summary
+          path: gqa-api-concurrency-report.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Print container diagnostics only on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 120 api db migrate || true
+      - name: Remove isolated CI database and evidence volumes
+        if: always()
+        run: |
+          docker compose down -v || true
+          rm -f .env
