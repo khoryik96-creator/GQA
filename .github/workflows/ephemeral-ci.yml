@@ -20,6 +20,7 @@ jobs:
           printf 'GQA_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" > .env
           printf 'GQA_RUNNER_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
           printf 'GQA_DB_APP_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> .env
+          printf 'GQA_DB_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> .env
       - name: Build controlled local stack and image
         run: docker compose up --build -d
       - name: Check isolated execution network
