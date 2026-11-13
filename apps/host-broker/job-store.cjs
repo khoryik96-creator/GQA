@@ -38,7 +38,12 @@ function validStoredJob(job){
     (job.started_at!==null&&!ISO.test(job.started_at))||
     (job.finished_at!==null&&!ISO.test(job.finished_at))||
     typeof job.failure_kind!=="string"||job.failure_kind.length>80||
-    !Number.isInteger(job.check_count)||job.check_count<0||job.check_count>20)return false;
+    !Number.isInteger(job.check_count)||job.check_count<0||job.check_count>20||
+    (job.result_checks!==undefined&&(!Array.isArray(job.result_checks)||
+      job.result_checks.length>20||job.result_checks.some(c=>!c||
+      !["passed","failed"].includes(c.status)||typeof c.name!=="string"||
+      c.name.length===0||c.name.length>120)))||
+    (job.screenshot_available!==undefined&&typeof job.screenshot_available!=="boolean"))return false;
  return true;
 }
 
@@ -46,6 +51,7 @@ class JobStore {
   constructor(dir=path.join(process.cwd(),".gqa-broker-state")){
     this.dir=dir;
     this.file=path.join(dir,"jobs.json");
+    this.evidenceDir=path.join(dir,"screenshots");
     this.jobs=[];
   }
   load(){
@@ -89,6 +95,25 @@ class JobStore {
     }
   }
   get(id){return this.jobs.find(j=>j.id===id)}
+  persistScreenshot(id,raw){
+    if(!ID.test(id)||typeof raw!=="string")throw Error("Invalid screenshot identity");
+    if(!raw)return false;
+    if(raw.length>1400000)throw Error("Screenshot exceeds limit");
+    const image=Buffer.from(raw,"base64");
+    if(image.length<8||image.length>1000000||
+      !image.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))
+      throw Error("Invalid screenshot bytes");
+    fs.mkdirSync(this.evidenceDir,{recursive:true,mode:0o700});
+    fs.writeFileSync(path.join(this.evidenceDir,id+".png"),image,{flag:"wx",mode:0o600});
+    return true;
+  }
+  readScreenshot(id){
+    if(!ID.test(id)||!this.get(id)?.screenshot_available)return null;
+    const file=path.join(this.evidenceDir,id+".png");
+    if(!fs.existsSync(file)||fs.lstatSync(file).isSymbolicLink())return null;
+    if(fs.statSync(file).size>1000000)return null;
+    return fs.readFileSync(file);
+  }
   list(){return this.jobs.slice().reverse()}
   pending(){return this.jobs.filter(j=>["queued","running","cancelling"].includes(j.status))}
   queued(){return this.jobs.find(j=>j.status==="queued")}
@@ -98,7 +123,7 @@ class JobStore {
     const stamp=new Date().toISOString();
     const record={id:crypto.randomUUID(),kind:spec.kind,spec,status:"queued",
       created_at:stamp,updated_at:stamp,started_at:null,finished_at:null,
-      failure_kind:"",check_count:0};
+      failure_kind:"",check_count:0,result_checks:[],screenshot_available:false};
     const before=this.jobs;
     this.jobs=[...before,record];
     try{this.save()}catch(err){this.jobs=before;throw err}
@@ -120,7 +145,8 @@ function publicJob(item){
    id:item.id,kind:item.kind,status:item.status,
    created_at:item.created_at,updated_at:item.updated_at,
    started_at:item.started_at,finished_at:item.finished_at,
-   failure_kind:item.failure_kind||"",check_count:item.check_count||0
+   failure_kind:item.failure_kind||"",check_count:item.check_count||0,
+   result_checks:item.result_checks||[],screenshot_available:!!item.screenshot_available
  };
 }
 module.exports={JobStore,publicJob,TERMINAL,ID,validStoredSpec,validStoredJob};
