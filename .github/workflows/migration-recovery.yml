@@ -46,6 +46,54 @@ jobs:
           docker compose run --rm migrate
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "2"
 
+      - name: Rehearse custom-format backup and transactional restore into a separate disposable database
+        run: |
+          set -euo pipefail
+          # Add linked records after the legacy schema was upgraded.
+          docker compose exec -T db psql -U gqa -d gqa -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO qa_requests(project_id,prompt,environment)
+          SELECT id,'GQA disposable backup verification','local'
+          FROM projects WHERE name='GQA legacy sentinel';
+          INSERT INTO plans(project_id,request_id,selected_agents,warnings)
+          SELECT project_id,id,'[]'::jsonb,'[]'::jsonb
+          FROM qa_requests WHERE prompt='GQA disposable backup verification';
+          INSERT INTO test_runs(project_id,plan_id,target_url,status)
+          SELECT project_id,id,'http://fixture:8081','passed'
+          FROM plans WHERE request_id IN
+            (SELECT id FROM qa_requests WHERE prompt='GQA disposable backup verification');
+          INSERT INTO browser_flows(project_id,plan_id,prompt,objective,steps,digest,generation_mode)
+          SELECT project_id,id,'GQA disposable browser backup fixture',
+            'Verify restored browser flow','[]'::jsonb,repeat('a',64),'rules'
+          FROM plans WHERE request_id IN
+            (SELECT id FROM qa_requests WHERE prompt='GQA disposable backup verification');
+          INSERT INTO memories(project_id,kind,content)
+          SELECT id,'requirement','GQA restore sentinel memory'
+          FROM projects WHERE name='GQA legacy sentinel';
+          SQL
+          backup="$(mktemp /tmp/gqa-ci-backup.XXXXXX.dump)"
+          trap 'rm -f "$backup"' EXIT
+          docker compose exec -T db pg_dump -U gqa -d gqa --format=custom --no-owner > "$backup"
+          test "$(wc -c < "$backup")" -gt 10000
+          echo "Synthetic dump SHA256: $(sha256sum "$backup" | cut -d ' ' -f1)"
+          docker compose exec -T db createdb -U gqa --template=template0 gqa_recovered
+          docker compose exec -T db pg_restore -U gqa -d gqa_recovered \
+            --no-owner --single-transaction --exit-on-error < "$backup"
+          for table in projects qa_requests plans test_runs browser_flows memories gqa_schema_migrations; do
+            source_rows="$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM $table")"
+            restore_rows="$(docker compose exec -T db psql -U gqa -d gqa_recovered -Atc "SELECT count(*) FROM $table")"
+            test "$source_rows" = "$restore_rows"
+            test "$restore_rows" -ge 1
+          done
+          expected="$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT checksum FROM gqa_schema_migrations WHERE version=2")"
+          restored="$(docker compose exec -T db psql -U gqa -d gqa_recovered -Atc "SELECT checksum FROM gqa_schema_migrations WHERE version=2")"
+          test "$expected" = "$restored"
+          test "$(docker compose exec -T db psql -U gqa -d gqa_recovered -Atc "SELECT count(*) FROM projects WHERE name='GQA legacy sentinel'")" = "1"
+          test "$(docker compose exec -T db psql -U gqa -d gqa_recovered -Atc "SELECT count(*) FROM memories WHERE content='GQA restore sentinel memory'")" = "1"
+          test "$(docker compose exec -T db psql -U gqa -d gqa_recovered -Atc "SELECT has_table_privilege('gqa_app','public.projects','SELECT')")" = "t"
+          test "$(docker compose exec -T db psql -U gqa -d gqa_recovered -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('plans_project_created_id','test_runs_project_started_id','browser_flows_project_created_id','memories_project_created_id')")" = "4"
+          docker compose exec -T db dropdb -U gqa gqa_recovered
+          echo "PASS: custom-format backup and transactional restore preserved seven linked tables, migration checksums, indexes, and app reader grant"
+
       - name: Reject modified history without changing application data
         run: |
           original="$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT checksum FROM public.gqa_schema_migrations WHERE version=1')"
