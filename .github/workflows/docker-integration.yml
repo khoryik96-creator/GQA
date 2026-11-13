@@ -21,6 +21,15 @@ jobs:
       - name: Build and start local stack
         run: docker compose up --build -d
 
+      - name: Verify least-privileged application database role
+        run: |
+          role_super="$(docker compose exec -T db psql -U gqa -d gqa -tAc "SELECT rolsuper FROM pg_roles WHERE rolname='gqa_app'" | tr -d '[:space:]')"
+          schema_create="$(docker compose exec -T db psql -U gqa -d gqa -tAc "SELECT has_schema_privilege('gqa_app','public','CREATE')" | tr -d '[:space:]')"
+          table_read="$(docker compose exec -T db psql -U gqa -d gqa -tAc "SELECT has_table_privilege('gqa_app','test_runs','SELECT')" | tr -d '[:space:]')"
+          test "$role_super" = "f"
+          test "$schema_create" = "f"
+          test "$table_read" = "t"
+          echo "PASS: API role is not superuser, cannot create schema objects, can read runtime tables"
       - name: Verify isolated worker settings and deny external egress
         run: |
           runner_id="$(docker compose ps -q runner)"
