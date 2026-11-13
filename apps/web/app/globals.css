@@ -228,3 +228,21 @@ select, input { color: #dfebf6; border: 1px solid #2a4053; border-radius: 9px; b
   }
   .tabs button { flex: 0 0 auto; white-space: nowrap; }
 }
+
+/* Narrow screens cannot accommodate a full project breadcrumb plus both
+   account actions on one rigid line. Allow wrapping and ellipsis instead. */
+@media (max-width: 760px) {
+  .topbar {
+    box-sizing: border-box;
+    min-width: 0;
+    height: auto;
+    min-height: 56px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 11px 16px;
+  }
+  .breadcrumb { min-width: 0; flex: 1 1 140px; gap: 7px; overflow: hidden; }
+  .breadcrumb strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-actions { flex: 0 1 auto; gap: 6px; min-width: 0; flex-wrap: wrap; }
+  .topbar-actions .button { min-height: 34px; padding: 7px 9px; font-size: 11px; }
+}
