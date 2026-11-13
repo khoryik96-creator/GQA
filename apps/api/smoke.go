@@ -156,8 +156,8 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   if err!=nil{
     reply.Checks=[]SmokeCheck{{Name:"Runner availability",Status:"failed",Detail:"Runner unavailable or returned invalid evidence",DurationMS:0}}
   }
+  reply=verifiedWorkerReply(reply,expectedSmokeChecks(runAPI,runWeb))
   run.Checks=reply.Checks
-  if len(run.Checks)==0{run.Checks=[]SmokeCheck{{Name:"Runner evidence",Status:"failed",Detail:"Runner produced no checks"}}}
   run.Status="passed"
   for _,check:=range run.Checks{if check.Status!="passed"{run.Status="failed";break}}
   run.Evidence=cleanRunEvidence(reply.Evidence,run.Status)

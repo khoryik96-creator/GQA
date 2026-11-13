@@ -227,6 +227,7 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
       Detail:"Runner was unavailable or returned unusable evidence",
     }}}
   }
+  reply=verifiedWorkerReply(reply,expectedFlowChecks(flow.Steps))
   if err:=persistFlowEvidence(r.Context(),s,&run,reply);err!=nil{
     fail(w,500,"Browser run finished but results could not be saved");return
   }
