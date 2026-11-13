@@ -168,7 +168,7 @@ func (a *authenticator) cookie(w http.ResponseWriter,value string,maxAge int){
 }
 func (a *authenticator) login(w http.ResponseWriter,r *http.Request){
  ip:=clientIP(r)
- 
+
  var input struct{
   Email string `json:"email"`
   Password string `json:"password"`
