@@ -20,6 +20,15 @@ export default function AdminWorkerJobs({apiBase}:{apiBase:string}){
  const [revision,setRevision]=useState(0);
  const [selectedResultId,setSelectedResultId]=useState("");
  const [result,setResult]=useState<JobEvidence|null>(null);
+ // Poll only while this administrator panel is mounted and enabled.
+ // This is deliberately bounded; errors continue to use the manual retry UI.
+ useEffect(()=>{
+  if(enabled!==true)return;
+  const handle=setInterval(()=>{
+   if(!document.hidden&&!busy)setRevision(v=>v+1);
+  },15000);
+  return ()=>clearInterval(handle);
+ },[enabled,busy]);
  useEffect(()=>{
   let active=true;
   fetch(apiBase+"/api/admin/broker-jobs",{
@@ -29,7 +38,7 @@ export default function AdminWorkerJobs({apiBase}:{apiBase:string}){
     if(response.status===501){setEnabled(false);return}
     if(!response.ok)throw Error("Unable to reach experimental host broker");
     const data=await response.json() as Job[];
-    if(active){setEnabled(true);setJobs(data);}
+    if(active){setEnabled(true);setJobs(data);setError("");}
   }).catch(err=>{if(active){setEnabled(true);setError((err as Error).message)}});
   return ()=>{active=false};
  },[apiBase,revision]);
