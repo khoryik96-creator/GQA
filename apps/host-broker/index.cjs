@@ -82,8 +82,15 @@ const server=http.createServer(async(req,res)=>{
     const id=jobRoute[1];
     if(!ID.test(id))return respond(res,400,{error:"Invalid job identity"});
     if(req.method==="GET"&&jobRoute[2]==="/result"){
-      const result=scheduler.getResult(id);
-      return respond(res,result?200:404,result||{error:"Job evidence not found"});
+      try{
+        const result=scheduler.getResult(id);
+        return respond(res,result?200:404,result||{error:"Job evidence not found"});
+      }catch{
+        // Corrupt/unreadable disk evidence is an infrastructure error, not
+        // proof of a missing test or a passing application. Never crash the
+        // broker or leak raw worker output when stored evidence is invalid.
+        return respond(res,503,{error:"Stored job evidence is temporarily unavailable"});
+      }
     }
     if(req.method==="GET"&&!jobRoute[2]){
       const job=scheduler.get(id);
