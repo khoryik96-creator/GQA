@@ -12,6 +12,19 @@ const RECOVERABLE=new Set(["running","cancelling","recovery_pending"]);
 const ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ISO=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
+const HASH=/^[a-f0-9]{64}$/;
+function idempotencyHash(key){
+  if(typeof key!=="string"||!ID.test(key))
+    throw Object.assign(new Error("Idempotency-Key must be a lowercase UUID"),{status:400});
+  return crypto.createHash("sha256").update(key).digest("hex");
+}
+function stableJSON(value){
+  if(Array.isArray(value))return "["+value.map(stableJSON).join(",")+"]";
+  if(value!==null&&typeof value==="object")
+    return "{"+Object.keys(value).sort().map(k=>JSON.stringify(k)+":"+stableJSON(value[k])).join(",")+"}";
+  return JSON.stringify(value);
+}
+
 function validStoredSpec(spec){
  if(!spec||typeof spec!=="object"||Array.isArray(spec)||
     !allowedTarget(spec.target_url,FIXTURES))return false;
@@ -38,7 +51,8 @@ function validStoredJob(job){
     (job.started_at!==null&&!ISO.test(job.started_at))||
     (job.finished_at!==null&&!ISO.test(job.finished_at))||
     typeof job.failure_kind!=="string"||job.failure_kind.length>80||
-    !Number.isInteger(job.check_count)||job.check_count<0||job.check_count>20)return false;
+    !Number.isInteger(job.check_count)||job.check_count<0||job.check_count>20||
+    (job.idempotency_hash!==undefined&&!HASH.test(job.idempotency_hash)))return false;
  return true;
 }
 
@@ -135,15 +149,28 @@ class JobStore {
       if(fs.existsSync(temp))fs.unlinkSync(temp);
     }
   }
+  findIdempotent(spec,key){
+    if(key===undefined||key===null)return null;
+    if(!validStoredSpec(spec))
+      throw Object.assign(new Error("Invalid job specification"),{status:400});
+    const hash=idempotencyHash(key);
+    const previous=this.jobs.find(j=>j.idempotency_hash===hash);
+    if(previous&&stableJSON(previous.spec)!==stableJSON(spec))
+      throw Object.assign(new Error("Idempotency-Key belongs to a different job"),{status:409});
+    return previous||null;
+  }
   get(id){return this.jobs.find(j=>j.id===id)}
   list(){return this.jobs.slice().reverse()}
   pending(){return this.jobs.filter(j=>["queued","running","cancelling"].includes(j.status))}
   queued(){return this.jobs.find(j=>j.status==="queued")}
   recoverable(){return this.jobs.filter(j=>RECOVERABLE.has(j.status))}
-  create(spec){
+  create(spec,key){
     if(!validStoredSpec(spec))throw new Error("Refusing unapproved broker job");
+    const previous=this.findIdempotent(spec,key);
+    if(previous)return previous;
     const stamp=new Date().toISOString();
     const record={id:crypto.randomUUID(),kind:spec.kind,spec,status:"queued",
+      ...(key===undefined||key===null?{}:{idempotency_hash:idempotencyHash(key)}),
       created_at:stamp,updated_at:stamp,started_at:null,finished_at:null,
       failure_kind:"",check_count:0};
     this.jobs.push(record);
