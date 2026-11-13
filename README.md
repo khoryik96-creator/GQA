@@ -46,8 +46,8 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Fill in **all three** `GQA_ADMIN_PASSWORD`, `GQA_RUNNER_TOKEN`, and
-`GQA_DB_APP_PASSWORD` with separate unique random secrets. The database
+Fill in **all four** `GQA_ADMIN_PASSWORD`, `GQA_RUNNER_TOKEN`,
+`GQA_DB_APP_PASSWORD` and `GQA_DB_ADMIN_PASSWORD` with independent random secrets. The database
 application password must be URL-safe (24+ alphanumeric characters) and
 is used only by the restricted runtime database role. The initial administrator password must be **16–72
 bytes**, and the runner token must be at least 24 characters. Never commit
@@ -200,3 +200,20 @@ or error details. Controlled fixture screenshots up to 1 MB are saved with
 restricted file permissions and exposed only through the global-admin API.
 Retention policies and independent storage encryption remain prerequisites
 for hosting real customer data.
+
+### Existing database volume upgrade (non-destructive)
+
+Older GQA releases used a fixed local PostgreSQL password. Changing
+`POSTGRES_PASSWORD` alone does not rotate an existing database password.
+Back up PostgreSQL and screenshots first. **Do not run `docker compose down -v`.**
+
+Add separately generated URL-safe random hex values for both
+`GQA_DB_ADMIN_PASSWORD` and `GQA_DB_APP_PASSWORD` to your existing `.env`.
+Run `docker compose up -d db`, then
+`docker compose exec db psql -U gqa -d gqa`.
+In that local psql console execute:
+`ALTER ROLE gqa PASSWORD 'YOUR_NEW_GQA_DB_ADMIN_PASSWORD';`
+using the actual random value, then exit with `\q`.
+Run `docker compose up --build -d`. The privileged migration service
+upgrades existing tables and app grants without deleting data. New
+installations initialize the new password automatically.
