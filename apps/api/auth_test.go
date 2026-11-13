@@ -1,6 +1,7 @@
 package main
 
 import (
+ "fmt"
  "net/http"
  "net/http/httptest"
  "strings"
@@ -80,4 +81,45 @@ func TestConcurrentAccountRateLimitIsAtomic(t *testing.T){
  auth.clearAccountFailures("admin@gqa.local")
  if !auth.reserveLoginAttempt("127.0.0.1","admin@gqa.local"){
   t.Fatal("successful login should reset account throttle")}
+}
+
+func TestLoginThrottleMapBoundedUnderUniqueAccountChurn(t *testing.T){
+ auth,_:=newAuthenticator(nil,"at-least-sixteen-character-password","http://localhost:3000",false)
+ // Simulate a shared network with many invalid account names. The account
+ // bucket is deliberately distinct from the shared IP bucket.
+ ip:="127.0.0.1"
+ for i:=0;i<maxIPLoginAttempts;i++{
+  if !auth.reserveLoginAttempt(ip,fmt.Sprintf("user-%d@example.test",i)){
+   t.Fatalf("unexpected rejection at %d",i)
+  }
+ }
+ if auth.reserveLoginAttempt(ip,"another@example.test"){
+  t.Fatal("IP budget was bypassed")
+ }
+ // Fill nearly all slots with active records from many IPs; no eviction of
+ // active limits may occur, even if the account names differ.
+ for i:=0;i<maxLoginThrottleBuckets;i++{
+  auth.failures[fmt.Sprintf("account:synthetic-%d",i)]=[]time.Time{time.Now()}
+ }
+ before:=len(auth.failures)
+ if auth.reserveLoginAttempt("other.example","unseen@example.test"){
+  t.Fatal("accepted new login when throttle memory exhausted")
+ }
+ if len(auth.failures)!=before{t.Fatal("throttle memory grew past capacity")}
+ if auth.reserveLoginAttempt(ip,"user-0@example.test"){
+  t.Fatal("active shared-IP limit was reset by memory pressure")
+ }
+}
+func TestLoginThrottleReclaimsExpiredKeys(t *testing.T){
+ auth,_:=newAuthenticator(nil,"at-least-sixteen-character-password","http://localhost:3000",false)
+ old:=time.Now().Add(-failedLoginWindow-time.Minute)
+ for i:=0;i<maxLoginThrottleBuckets;i++{
+  auth.failures[fmt.Sprintf("expired-%d",i)]=[]time.Time{old}
+ }
+ if !auth.reserveLoginAttempt("fresh-ip","fresh@example.test"){
+  t.Fatal("expired buckets should be reclaimed before rejecting a login")
+ }
+ if len(auth.failures)>maxLoginThrottleBuckets{
+  t.Fatalf("unbounded throttle map: %d",len(auth.failures))
+ }
 }
