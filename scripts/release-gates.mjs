@@ -23,7 +23,7 @@ check(/GQA_RUNNER_TOKEN:\s*\$\{GQA_RUNNER_TOKEN:\?/.test(compose),
 check(/GQA_DB_APP_PASSWORD:\s*\$\{GQA_DB_APP_PASSWORD:\?/.test(compose) &&
       /GQA_SCHEMA_MANAGED:\s*"true"/.test(compose) &&
       compose.includes("postgres://gqa_app:"),
- "API uses a non-superuser runtime database identity");
+ "Compose refuses default database-admin credentials and API uses a non-superuser identity");
 check(/storage:\s*\n\s*internal:\s*true/.test(compose) &&
       /migrate:\s*\n[\s\S]*?service_completed_successfully/.test(compose),
  "PostgreSQL remains isolated behind a completed migration task");
