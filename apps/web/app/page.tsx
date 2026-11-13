@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Activity, AlertTriangle, ArrowRight, BrainCircuit, CheckCircle2,
   Clock3, Database, FileCode2, FolderKanban, GitBranch, Globe2,
@@ -87,6 +87,7 @@ export default function CommandCenter() {
   const [securityOpen, setSecurityOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const activeProject = useRef<string | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [inspection, setInspection] = useState<RepoSnapshot | null>(null);
@@ -144,8 +145,12 @@ export default function CommandCenter() {
       .then(list => {
         if (!cancelled) {
           setProjects(list);
-          setSelectedId(previous => list.some(project => project.id === previous) ?
-            previous : list[0]?.id || null);
+          setSelectedId(previous => {
+            const next=list.some(project => project.id === previous) ?
+              previous : list[0]?.id || null;
+            activeProject.current=next;
+            return next;
+          });
         }
       })
       .catch(err => { if (!cancelled) setError(err.message); })
@@ -156,6 +161,7 @@ export default function CommandCenter() {
   useEffect(() => {
     if (!selectedId) return;
     let cancelled = false;
+    activeProject.current=selectedId;
     setPlans([]);
     setMemories([]);
     setRuns([]);
@@ -195,6 +201,7 @@ export default function CommandCenter() {
   }
 
   function clearSessionUI() {
+    activeProject.current=null;
     setProjects([]);setSelectedId(null);setPlans([]);setMemories([]);setRuns([]);
     setAuthStatus("anonymous");setPassword("");setAccount(null);
     setSecurityOpen(false);setView("command");
@@ -236,11 +243,14 @@ export default function CommandCenter() {
     if (!selectedId || !canQA) return;
     setBusy(true); setError("");
     try {
-      const plan = await call<Plan>("/api/projects/" + selectedId + "/plans", {
+      const projectAtStart=selectedId;
+      const plan = await call<Plan>("/api/projects/" + projectAtStart + "/plans", {
         method: "POST", body: JSON.stringify({ prompt, environment })
       });
-      setPlans(list => [plan, ...list]);
-      if (plan.repository_evidence?.repository) setInspection(plan.repository_evidence);
+      if(activeProject.current===projectAtStart){
+        setPlans(list => [plan, ...list]);
+        if (plan.repository_evidence?.repository) setInspection(plan.repository_evidence);
+      }
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
   }
@@ -250,8 +260,9 @@ export default function CommandCenter() {
     if (!selectedId || !canQA) return;
     setInspecting(true); setError("");
     try {
-      const snapshot = await call<RepoSnapshot>("/api/projects/" + selectedId + "/inspection", { method: "POST" });
-      setInspection(snapshot);
+      const projectAtStart=selectedId;
+      const snapshot = await call<RepoSnapshot>("/api/projects/" + projectAtStart + "/inspection", { method: "POST" });
+      if(activeProject.current===projectAtStart)setInspection(snapshot);
     } catch (err) { setError((err as Error).message); }
     finally { setInspecting(false); }
   }
@@ -261,10 +272,11 @@ export default function CommandCenter() {
     if (!selectedId || !latest || !canQA) return;
     setRunningSmoke(true); setError("");
     try {
-      const result = await call<TestRun>("/api/projects/" + selectedId + "/runs", {
+      const projectAtStart=selectedId;
+      const result = await call<TestRun>("/api/projects/" + projectAtStart + "/runs", {
         method: "POST", body: JSON.stringify({ plan_id: latest.id, target_url: smokeTarget })
       });
-      setRuns(list => [result, ...list]);
+      if(activeProject.current===projectAtStart)setRuns(list => [result, ...list]);
     } catch (err) { setError((err as Error).message); }
     finally { setRunningSmoke(false); }
   }
@@ -274,15 +286,18 @@ export default function CommandCenter() {
     if (!selectedId || !canQA) return;
     setSavingMemory(true); setError("");
     try {
-      const memory = await call<Memory>("/api/projects/" + selectedId + "/memories", {
+      const projectAtStart=selectedId;
+      const memory = await call<Memory>("/api/projects/" + projectAtStart + "/memories", {
         method: "POST",
         body: JSON.stringify({ kind: memoryKind, content: memoryText, supersedes_id: supersedesId })
       });
-      setMemories(list => [
-        memory,
-        ...list.map(m => m.id === supersedesId ? { ...m, status: "superseded" } : m)
-      ]);
-      setMemoryText(""); setSupersedesId("");
+      if(activeProject.current===projectAtStart){
+        setMemories(list => [
+          memory,
+          ...list.map(m => m.id === supersedesId ? { ...m, status: "superseded" } : m)
+        ]);
+        setMemoryText(""); setSupersedesId("");
+      }
     } catch (err) { setError((err as Error).message); }
     finally { setSavingMemory(false); }
   }
@@ -292,8 +307,9 @@ export default function CommandCenter() {
     if (!selectedId) return;
     setError("");
     try {
-      const result = await call<Memory[]>("/api/projects/" + selectedId + "/memories?q=" + encodeURIComponent(memorySearch));
-      setMemories(result);
+      const projectAtStart=selectedId;
+      const result = await call<Memory[]>("/api/projects/" + projectAtStart + "/memories?q=" + encodeURIComponent(memorySearch));
+      if(activeProject.current===projectAtStart)setMemories(result);
     } catch (err) { setError((err as Error).message); }
   }
 
@@ -347,7 +363,7 @@ export default function CommandCenter() {
         <div className="sidebar-section">
           <div className="section-title"><span>PROJECTS</span>{isAdmin&&<button className="icon-btn" title="Create project" onClick={() => setShowCreate(true)}><Plus size={16}/></button>}</div>
           {projects.map(p => (
-            <button key={p.id} className={"project-item " + (selectedId === p.id ? "active" : "")} onClick={() => { setSelectedId(p.id); setView("command"); setError(""); }}>
+            <button key={p.id} className={"project-item " + (selectedId === p.id ? "active" : "")} onClick={() => { activeProject.current=p.id; setSelectedId(p.id); setView("command"); setError(""); }}>
               <Layers3 size={16}/><span>{p.name}</span>
               {selectedId === p.id && <span className="selected-indicator"/>}
             </button>

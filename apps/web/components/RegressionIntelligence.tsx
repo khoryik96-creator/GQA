@@ -109,7 +109,7 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
 
  useEffect(()=>{
   let active=true;
-  setLoading(true);setError("");
+  setLoading(true);setError("");setReport(null);
   fetch(apiBase+"/api/projects/"+projectId+"/quality",{
    credentials:"include",cache:"no-store"
   }).then(async response=>{
