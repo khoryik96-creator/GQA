@@ -10,6 +10,8 @@ import (
   "net/http"
   "net/url"
   "os"
+  "os/signal"
+  "syscall"
   "regexp"
   "strings"
   "time"
@@ -138,9 +140,20 @@ func main() {
   log.Printf("GQA API listening on :%s", port)
   httpServer:=&http.Server{
     Addr:":"+port,Handler:cors(auth.enforce(mux),origin),
-    ReadHeaderTimeout:5*time.Second,IdleTimeout:60*time.Second,
+    ReadHeaderTimeout:5*time.Second,ReadTimeout:20*time.Second,
+    WriteTimeout:100*time.Second,IdleTimeout:60*time.Second,MaxHeaderBytes:16<<10,
   }
-  log.Fatal(httpServer.ListenAndServe())
+  stopCtx,stopSignal:=signal.NotifyContext(context.Background(),syscall.SIGINT,syscall.SIGTERM)
+  defer stopSignal()
+  go func(){
+    <-stopCtx.Done()
+    shutdownCtx,cancel:=context.WithTimeout(context.Background(),90*time.Second)
+    defer cancel()
+    _=httpServer.Shutdown(shutdownCtx)
+  }()
+  if err:=httpServer.ListenAndServe();err!=nil && err!=http.ErrServerClosed{
+    log.Fatal("API server: ",err)
+  }
 }
 
 func cors(next http.Handler, origin string) http.Handler {

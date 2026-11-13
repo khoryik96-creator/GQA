@@ -197,3 +197,9 @@ CREATE INDEX IF NOT EXISTS test_runs_quality_recent ON test_runs(project_id,star
 -- A manually typed build revision must never be reported as attested.
 ALTER TABLE repair_acceptances ADD COLUMN IF NOT EXISTS revision_provenance TEXT NOT NULL
  DEFAULT 'user_declared' CHECK (revision_provenance IN ('user_declared','build_attested'));
+
+-- Support crash recovery as a distinct execution state instead of reporting
+-- an infrastructure interruption as an application assertion failure.
+ALTER TABLE test_runs DROP CONSTRAINT IF EXISTS test_runs_status_check;
+ALTER TABLE test_runs ADD CONSTRAINT test_runs_status_check
+ CHECK (status IN ('queued','running','passed','failed','cancelled','timed_out','interrupted','incomplete'));

@@ -34,6 +34,7 @@ services:
 
   api:
     build: ./apps/api
+    stop_grace_period: 95s
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

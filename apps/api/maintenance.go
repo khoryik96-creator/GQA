@@ -11,7 +11,7 @@ import (
 // not passing or failing application assertions.
 func reconcileOrphanedRuns(ctx context.Context,db *pgxpool.Pool)error{
  _,err:=db.Exec(ctx,`
-  UPDATE test_runs SET status='failed',finished_at=now(),
+  UPDATE test_runs SET status='interrupted',finished_at=now(),
    checks='[{"name":"Runner interrupted","status":"failed","duration_ms":0,"detail":"The API restarted before run evidence was finalized"}]'::jsonb,
    evidence='{"failure_kind":"runner_interrupted","worker_lifecycle":"unverified","console_errors":0,"page_exceptions":0,"failed_requests":0,"http_5xx":0}'::jsonb,
    screenshot_available=false
