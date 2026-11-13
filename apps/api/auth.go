@@ -88,7 +88,11 @@ func clientIP(r *http.Request)string{
  if err!=nil{return r.RemoteAddr}
  return host
 }
-const maxIPLoginAttempts=100
+const (
+ maxIPLoginAttempts = 100
+ // This is an in-process DoS guard, not a multi-instance login policy.
+ maxLoginThrottleBuckets = 4096
+)
 // Reserve login capacity atomically before bcrypt; account limits and
 // shared-network IP limits are intentionally separate.
 func (a *authenticator) reserveLoginAttempt(ip,email string)bool{
@@ -104,7 +108,17 @@ func (a *authenticator) reserveLoginAttempt(ip,email string)bool{
   }
   if len(fresh)==0{delete(a.failures,key)}else{a.failures[key]=fresh}
  }
+ // Many unique, invalid usernames must not grow the throttle map forever.
+ // Purge expired keys before refusing new ones; do not evict live throttle
+ // state because eviction would enable bypassing active limits.
+ if len(a.failures)>=maxLoginThrottleBuckets-1{
+  for key:=range a.failures{prune(key)}
+ }
  prune(accountKey);prune(ipKey)
+ newKeys:=0
+ if _,exists:=a.failures[accountKey];!exists{newKeys++}
+ if _,exists:=a.failures[ipKey];!exists{newKeys++}
+ if len(a.failures)+newKeys>maxLoginThrottleBuckets{return false}
  if len(a.failures[accountKey])>=maxLoginFailures||
   len(a.failures[ipKey])>=maxIPLoginAttempts{return false}
  a.failures[accountKey]=append(a.failures[accountKey],now)
