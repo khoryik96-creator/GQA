@@ -40,6 +40,7 @@ jobs:
           export GQA_UI_TEST_ADMIN_PASSWORD="$(sed -n 's/^GQA_ADMIN_PASSWORD=//p' ../../.env)"
           node tests/ui_e2e.mjs
           node tests/advanced_ui_e2e.mjs
+          node tests/repair_review_ui_e2e.mjs
       - name: Upload browser screenshots on failure
         if: failure()
         uses: actions/upload-artifact@v4
