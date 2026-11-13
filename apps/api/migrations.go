@@ -29,7 +29,7 @@ func applySchemaAndGrants(ctx context.Context,db *pgxpool.Pool)error{
  // PostgreSQL performs SQL-literal escaping; never concatenate untrusted
  // password text directly into an ALTER ROLE command.
  var alter string
- err=db.QueryRow(ctx,`SELECT format('ALTER ROLE gqa_app PASSWORD %L',$1)`,pwd).Scan(&alter)
+ err=db.QueryRow(ctx,`SELECT format('ALTER ROLE gqa_app PASSWORD %L',$1::text)`,pwd).Scan(&alter)
  if err!=nil{return err}
  if _,err=db.Exec(ctx,alter);err!=nil{return err}
  _,err=db.Exec(ctx,`
