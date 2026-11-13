@@ -26,7 +26,7 @@ INSERT INTO browser_flows(project_id,plan_id,prompt,objective,steps,digest,gener
  SELECT :'bench_project'::uuid,:'bench_plan'::uuid,
   'Synthetic browser flow '||i,'Benchmark synthetic flow','[]'::jsonb,
   repeat('a',64),'rules'
- FROM generate_series(1,25000);
+ FROM generate_series(1,25000) i;
 
 ANALYZE;
 DO $$
