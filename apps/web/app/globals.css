@@ -209,10 +209,7 @@ select, input { color: #dfebf6; border: 1px solid #2a4053; border-radius: 9px; b
   transform: translateY(-150%);
 }
 .skip-link:focus-visible { transform: translateY(0); }
-:where(button, a, input, select, textarea):focus-visible {
+:where(button, a, input, select, textarea):focus {
   outline: 3px solid #65f1dd;
   outline-offset: 3px;
-}
-:where(button, a, input, select, textarea):focus:not(:focus-visible) {
-  outline-offset: 0;
 }
