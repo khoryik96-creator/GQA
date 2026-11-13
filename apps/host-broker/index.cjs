@@ -77,13 +77,20 @@ const server=http.createServer(async(req,res)=>{
     return respond(res,401,{error:"Unauthorized"});
   if(req.method==="GET"&&route==="/jobs")
     return respond(res,200,scheduler.list().slice(0,100));
-  const jobRoute=/^\/jobs\/([a-f0-9-]{36})(\/cancel)?$/.exec(route);
+  const jobRoute=/^\/jobs\/([a-f0-9-]{36})(\/cancel|\/screenshot)?$/.exec(route);
   if(jobRoute){
     const id=jobRoute[1];
     if(!ID.test(id))return respond(res,400,{error:"Invalid job identity"});
     if(req.method==="GET"&&!jobRoute[2]){
       const job=scheduler.get(id);
       return respond(res,job?200:404,job||{error:"Job not found"});
+    }
+    if(req.method==="GET"&&jobRoute[2]==="/screenshot"){
+      const screenshot=scheduler.store.readScreenshot(id);
+      if(!screenshot)return respond(res,404,{error:"Screenshot not found"});
+      res.writeHead(200,{"content-type":"image/png",
+        "cache-control":"no-store","x-content-type-options":"nosniff"});
+      return res.end(screenshot);
     }
     if(req.method==="POST"&&jobRoute[2]){
       const job=await scheduler.cancel(id);

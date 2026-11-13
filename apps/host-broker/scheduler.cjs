@@ -94,13 +94,22 @@ class Scheduler {
       }
       const cancelled=controller.signal.aborted;
       const final=cancelled?failure("worker_cancelled",next.id):result;
+      // Never durably copy arbitrary worker detail strings or page content.
+      const safeChecks=(final.checks||[]).slice(0,20).map(c=>({
+        name:String(c.name||"").slice(0,120),status:c.status
+      }));
+      const screenshotSaved=!cancelled&&this.store.persistScreenshot(
+        next.id,final.screenshot_base64||"");
       const anyFailed=final.checks?.some(c=>c.status!=="passed")!==false;
       this.store.transition(next.id,{status:cancelled?"cancelled":anyFailed?"failed":"passed",
         finished_at:new Date().toISOString(),
         failure_kind:final.evidence?.failure_kind||"",
-        check_count:final.checks?.length||0});
+        check_count:final.checks?.length||0,
+        result_checks:safeChecks,screenshot_available:screenshotSaved});
       this.settle(next.id,final);
     }).catch(()=>{
+      // A job result/journal failure is not safe to treat as a completed run.
+      this.ready=false;
       const final=failure(controller.signal.aborted?"worker_cancelled":"worker_error",next.id);
       try{
         this.store.transition(next.id,{status:controller.signal.aborted?"cancelled":"failed",

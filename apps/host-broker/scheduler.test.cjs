@@ -173,3 +173,17 @@ test("a failed journal write rolls back in-memory changes",t=>{
  assert.deepEqual(store.jobs,previous);
  store.save=real;
 });
+
+test("completed async jobs retain safe check summaries but no raw details",async t=>{
+ const dir=temp(t);
+ const scheduler=new Scheduler({store:new JobStore(dir),cleanup:async()=>{},
+  runJob:async()=>({checks:[{name:"API GET /healthz",status:"failed",
+    detail:"password and private page data must not be stored"}],screenshot_base64:""})});
+ await scheduler.start();
+ const item=scheduler.submitSync(spec);
+ await item.done;await tick();
+ const persisted=new JobStore(dir);persisted.load();
+ const record=persisted.get(item.job.id);
+ assert.deepEqual(record.result_checks,[{name:"API GET /healthz",status:"failed"}]);
+ assert.ok(!JSON.stringify(record).includes("password and private page"));
+});
