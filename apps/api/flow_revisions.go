@@ -132,4 +132,3 @@ func (s *server) flowRevisionHistory(w http.ResponseWriter,r *http.Request){
  // one entry and can be reviewed without being changed by the editor.
  writeJSON(w,200,history)
 }
-
