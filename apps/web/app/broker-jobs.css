@@ -7,3 +7,9 @@
 .broker-job-row .button {padding:6px 10px;min-height:31px;font-size:11px}
 .broker-jobs .fine-print {margin-top:16px}
 @media(max-width:720px){.broker-job-row {flex-wrap:wrap}}
+
+.broker-result{margin-top:16px;padding:14px;border:1px solid #375369;border-radius:10px;background:#102334}
+.broker-result-check{padding:9px 0;border-bottom:1px solid #2b4454;display:flex;gap:10px;flex-wrap:wrap}
+.broker-result-check strong{font-size:12px}
+.broker-result-check small{font-size:11px;color:#a7b9c5}
+.broker-result-image{width:100%;max-width:800px;max-height:480px;object-fit:contain;border-radius:6px;margin-top:12px}
