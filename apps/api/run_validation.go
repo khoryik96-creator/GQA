@@ -1,6 +1,12 @@
 package main
 
-import "fmt"
+import (
+ "fmt"
+ "io"
+ "bytes"
+ "encoding/json"
+ "errors"
+)
 
 // The execution worker is not trusted to declare success unless its result
 // covers every check requested by the reviewable test specification.
@@ -44,4 +50,24 @@ func recordedRunnerFailure(name string)workerReply{
  return workerReply{Checks:[]SmokeCheck{{Name:name,Status:"failed",
    Detail:"Runner unavailable or returned unusable evidence"}},
    Evidence:RunEvidence{FailureKind:"runner_unavailable"}}
+}
+
+const maxWorkerReplyBytes=2<<20
+// A worker may fail or be corrupted. Reject oversized, unknown, or trailing
+// data instead of accepting the first syntactically valid JSON object.
+func decodeWorkerReply(body io.Reader)(workerReply,error){
+ var result workerReply
+ raw,err:=io.ReadAll(io.LimitReader(body,maxWorkerReplyBytes+1))
+ if err!=nil{return result,err}
+ if len(raw)>maxWorkerReplyBytes{
+  return result,errors.New("worker response exceeded quota")
+ }
+ dec:=json.NewDecoder(bytes.NewReader(raw))
+ dec.DisallowUnknownFields()
+ if err:=dec.Decode(&result);err!=nil{return workerReply{},err}
+ var trailing any
+ if err:=dec.Decode(&trailing);err!=io.EOF{
+  return workerReply{},errors.New("worker response contains trailing or invalid content")
+ }
+ return result,nil
 }

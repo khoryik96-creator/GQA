@@ -217,7 +217,7 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
     if err==nil{
       defer resp.Body.Close()
       if resp.StatusCode==200{
-        err=json.NewDecoder(io.LimitReader(resp.Body,2<<20)).Decode(&reply)
+        reply,err=decodeWorkerReply(resp.Body)
       }else{
         err=fmt.Errorf("browser runner HTTP %d",resp.StatusCode)
       }

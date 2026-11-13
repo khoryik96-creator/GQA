@@ -1,5 +1,5 @@
 package main
-import "testing"
+import ("testing";"strings")
 func TestSmokeEvidenceRejectsPartialSuccess(t *testing.T){
  complete:=[]SmokeCheck{{Name:"API GET /healthz",Status:"passed"},
   {Name:"Browser homepage smoke",Status:"passed"}}
@@ -26,4 +26,19 @@ func TestFlowEvidenceValidatesStepSequence(t *testing.T){
  failed[1].Status="failed"
  if !validatedFlowChecks(failed,steps){t.Fatal("early failure rejected")}
  if validatedFlowChecks(append(failed,full[2]),steps){t.Fatal("checks continued after failure")}
+}
+
+func TestWorkerReplyDecoderRejectsGarbageAndOversize(t *testing.T){
+ valid:=`{"checks":[{"name":"API GET /healthz","status":"passed","duration_ms":1,"detail":"HTTP 200"}],"screenshot_base64":"","evidence":{"failure_kind":"none"}}`
+ if _,err:=decodeWorkerReply(strings.NewReader(valid));err!=nil{
+  t.Fatalf("valid worker result rejected: %v",err)
+ }
+ for _,invalid:=range []string{
+  valid+"{}",valid+" trailing",strings.Replace(valid,`"checks":`,`"unknown":1,"checks":`,1),
+  strings.Repeat("x",maxWorkerReplyBytes+1),
+ }{
+  if _,err:=decodeWorkerReply(strings.NewReader(invalid));err==nil{
+   t.Fatal("Untrusted worker response was accepted")
+  }
+ }
 }

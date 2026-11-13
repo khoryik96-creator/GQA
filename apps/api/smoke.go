@@ -151,7 +151,7 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   if err==nil{
     defer resp.Body.Close()
     if resp.StatusCode==http.StatusOK{
-      err=json.NewDecoder(io.LimitReader(resp.Body,2<<20)).Decode(&reply)
+      reply,err=decodeWorkerReply(resp.Body)
     }else{err=fmt.Errorf("runner returned HTTP %d",resp.StatusCode)}
   }
   if err!=nil {
