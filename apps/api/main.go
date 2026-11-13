@@ -285,9 +285,22 @@ func (s *server) memories(w http.ResponseWriter, r *http.Request) {
   if r.Method == http.MethodGet {
     query := strings.TrimSpace(r.URL.Query().Get("q"))
     if len(query) > 200 { fail(w,400,"Memory search too long"); return }
-    rows, err := s.db.Query(r.Context(),
-      "SELECT id::text,project_id::text,kind,content,source,status,COALESCE(supersedes_id::text,''),created_at FROM memories WHERE project_id=$1::uuid AND ($2='' OR search_document @@ plainto_tsquery('english',$2)) ORDER BY created_at DESC LIMIT 100",
-      id,query)
+    limit,cursor,paged,pageErr:=parseMemoryPageRequest(r)
+    if pageErr!=nil{fail(w,400,pageErr.Error());return}
+    const queryBase="SELECT id::text,project_id::text,kind,content,source,status,COALESCE(supersedes_id::text,''),created_at FROM memories WHERE project_id=$1::uuid AND ($2='' OR search_document @@ plainto_tsquery('english',$2))"
+    var rows pgx.Rows
+    var err error
+    if paged {
+      // Stable keyset order; the UUID breaks timestamp ties. Fetch one
+      // extra record to detect whether a next page exists.
+      rows,err=s.db.Query(r.Context(),queryBase+
+        " AND ($3::timestamptz IS NULL OR (created_at,id) < ($3::timestamptz,$4::uuid))"+
+        " ORDER BY created_at DESC,id DESC LIMIT $5",
+        id,query,memoryCursorTime(cursor),memoryCursorIDValue(cursor),limit+1)
+    } else {
+      rows,err=s.db.Query(r.Context(),queryBase+
+        " ORDER BY created_at DESC,id DESC LIMIT 100",id,query)
+    }
     if err != nil { fail(w,500,"Unable to retrieve memories"); return }
     defer rows.Close()
     memories := []Memory{}
@@ -299,7 +312,17 @@ func (s *server) memories(w http.ResponseWriter, r *http.Request) {
       memories = append(memories,m)
     }
     if rows.Err() != nil { fail(w,500,"Unable to read memories"); return }
-    writeJSON(w,200,memories)
+    if paged {
+      next:=""
+      if len(memories)>limit{
+        memories=memories[:limit]
+        last:=memories[len(memories)-1]
+        next=encodeMemoryCursor(last.CreatedAt,last.ID)
+      }
+      writeJSON(w,200,memoryPage{Items:memories,NextCursor:next})
+    } else {
+      writeJSON(w,200,memories)
+    }
     return
   }
 
