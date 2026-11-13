@@ -61,3 +61,12 @@ func parseMemoryPageRequest(r *http.Request)(int,memoryCursor,bool,error){
  cursor,err:=decodeMemoryCursor(cursorRaw)
  return limit,cursor,true,err
 }
+
+func memoryCursorTime(cursor memoryCursor)any{
+ if cursor.ID==""{return nil}
+ return cursor.CreatedAt
+}
+func memoryCursorIDValue(cursor memoryCursor)any{
+ if cursor.ID==""{return nil}
+ return cursor.ID
+}
