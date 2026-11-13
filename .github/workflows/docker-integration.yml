@@ -1,0 +1,499 @@
+name: GQA Docker Integration
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate isolated CI credentials
+        run: |
+          printf 'GQA_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" > .env
+          printf 'GQA_RUNNER_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+      - name: Build and start local stack
+        run: docker compose up --build -d
+
+      - name: Verify isolated worker settings and deny external egress
+        run: |
+          runner_id="$(docker compose ps -q runner)"
+          test -n "$runner_id"
+          test "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$runner_id")" = "true"
+          test "$(docker inspect -f '{{.HostConfig.PidsLimit}}' "$runner_id")" = "256"
+          docker compose exec -T runner node -e '
+            fetch("https://example.com", {signal: AbortSignal.timeout(3000)})
+              .then(() => { console.error("External worker egress was allowed"); process.exit(1); })
+              .catch(() => { console.log("PASS: external worker egress denied"); process.exit(0); })
+          '
+      - name: Verify memory-aware planning and real smoke checks
+        run: |
+          python3 - <<'PY'
+          import json
+          import time
+          import urllib.request
+          import urllib.error
+          import http.cookiejar
+
+          BASE = "http://127.0.0.1:8080"
+          FRONTEND_ORIGIN = "http://localhost:3000"
+          cookies = http.cookiejar.CookieJar()
+          urllib.request.install_opener(urllib.request.build_opener(
+              urllib.request.HTTPCookieProcessor(cookies)
+          ))
+          for attempt in range(90):
+              try:
+                  with urllib.request.urlopen(BASE + "/healthz", timeout=2) as response:
+                      if response.status == 200:
+                          break
+              except Exception:
+                  time.sleep(2)
+          else:
+              raise AssertionError("Go API did not become ready")
+
+          # The full QA API is private until a local administrator signs in.
+          try:
+              urllib.request.urlopen(BASE + "/api/projects", timeout=4)
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 401
+          else:
+              raise AssertionError("Anonymous project access unexpectedly succeeded")
+
+          with open(".env", encoding="utf-8") as env_file:
+              admin_password = next(line.split("=", 1)[1].strip()
+                  for line in env_file if line.startswith("GQA_ADMIN_PASSWORD="))
+          login = urllib.request.Request(
+              BASE + "/api/auth/login",
+              data=json.dumps({"password": admin_password}).encode("utf-8"),
+              method="POST",
+              headers={"Content-Type": "application/json", "Origin": FRONTEND_ORIGIN},
+          )
+          with urllib.request.urlopen(login, timeout=8) as response:
+              session = json.loads(response.read().decode("utf-8"))
+              assert session["authenticated"] is True
+              assert "HttpOnly" in response.headers["Set-Cookie"]
+              assert "SameSite=Strict" in response.headers["Set-Cookie"]
+          with urllib.request.urlopen(BASE + "/api/auth/session") as response:
+              assert json.load(response)["authenticated"] is True
+
+          def request(path, payload):
+              body = json.dumps(payload).encode("utf-8")
+              req = urllib.request.Request(
+                  BASE + path,
+                  data=body,
+                  method="POST",
+                  headers={"Content-Type": "application/json", "Origin": FRONTEND_ORIGIN},
+              )
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  if resp.status == 204:
+                      return None
+                  return json.loads(resp.read().decode("utf-8"))
+
+          project = request("/api/projects", {
+              "name": "GQA CI Fixture",
+              "repo_url": "https://github.com/khoryik96-creator/GQA",
+              "app_type": "fullstack",
+              "stack": "TypeScript, Go"
+          })
+          project_id = project["id"]
+          memory = request(f"/api/projects/{project_id}/memories", {
+              "kind": "requirement",
+              "content": "Every user login must have an authorization API regression check"
+          })
+          plan = request(f"/api/projects/{project_id}/plans", {
+              "prompt": "Verify the application homepage and API health using read-only smoke checks",
+              "environment": "local"
+          })
+          assert memory["id"] in [m["id"] for m in plan["consulted_memories"]], plan
+          assert {"web", "api"}.issubset({a["id"] for a in plan["selected_agents"]}), plan
+          assert plan["approval_required"] is False, plan
+          run = request(f"/api/projects/{project_id}/runs", {
+              "plan_id": plan["id"],
+              "target_url": "http://fixture:8081"
+          })
+          assert run["status"] == "passed", run
+          assert {x["name"] for x in run["checks"]} == {
+              "API GET /healthz", "Browser homepage smoke"
+          }, run
+          assert all(x["status"] == "passed" for x in run["checks"]), run
+          assert run["screenshot_available"], run
+          assert run["evidence"]["worker_lifecycle"] == "single_job_process", run
+          assert run["evidence"]["failure_kind"] == "none", run
+          assert run["evidence"]["job_id"], run
+
+          screenshot = urllib.request.urlopen(
+              BASE + "/api/runs/" + run["id"] + "/screenshot", timeout=10
+          ).read()
+          assert screenshot[:8] == b"\x89PNG\r\n\x1a\n", "Screenshot is not PNG"
+
+          production_plan = request(f"/api/projects/{project_id}/plans", {
+              "prompt": "Test API and login regression with safe smoke checks",
+              "environment": "production"
+          })
+          assert production_plan["approval_required"] is True
+          try:
+              request(f"/api/projects/{project_id}/runs", {
+                  "plan_id": production_plan["id"],
+                  "target_url": "http://fixture:8081"
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 403, exc.code
+          else:
+              raise AssertionError("Production plan unexpectedly executable")
+
+          flow = request(f"/api/projects/{project_id}/flows", {
+              "plan_id": plan["id"],
+              "prompt": "Open the demo app, click Show details and verify fixture details are visible"
+          })
+          assert flow["generation_mode"] == "rules", flow
+          assert len(flow["steps"]) >= 4, flow
+          assert any(x["op"] == "assert_text" for x in flow["steps"]), flow
+          assert len(flow["digest"]) == 64, flow
+
+          try:
+              request(f"/api/projects/{project_id}/flows/{flow['id']}/execute", {
+                  "target_url": "http://fixture:8081",
+                  "acknowledged_digest": "0" * 64
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 403
+          else:
+              raise AssertionError("Unreviewed browser flow unexpectedly ran")
+
+          browser_run = request(f"/api/projects/{project_id}/flows/{flow['id']}/execute", {
+              "target_url": "http://fixture:8081",
+              "acknowledged_digest": flow["digest"]
+          })
+          assert browser_run["status"] == "passed", browser_run
+          assert browser_run["execution_kind"] == "browser_flow", browser_run
+          assert browser_run["flow_id"] == flow["id"], browser_run
+          assert all(x["status"] == "passed" for x in browser_run["checks"]), browser_run
+          assert len(browser_run["checks"]) >= 4, browser_run
+          assert browser_run["screenshot_available"], browser_run
+          assert browser_run["evidence"]["worker_lifecycle"] == "single_job_process"
+          assert browser_run["evidence"]["failure_kind"] == "none"
+          assert browser_run["evidence"]["job_id"] != run["evidence"]["job_id"]
+
+          email_flow = request(f"/api/projects/{project_id}/flows", {
+              "plan_id": plan["id"],
+              "prompt": "Fill email and preview email confirmation on the demo fixture"
+          })
+          email_run = request(f"/api/projects/{project_id}/flows/{email_flow['id']}/execute", {
+              "target_url": "http://fixture:8081",
+              "acknowledged_digest": email_flow["digest"]
+          })
+          assert email_run["status"] == "passed", email_run
+
+          production_flow = request(f"/api/projects/{project_id}/flows", {
+              "plan_id": production_plan["id"],
+              "prompt": "Verify the browser homepage for production deployment"
+          })
+          try:
+              request(f"/api/projects/{project_id}/flows/{production_flow['id']}/execute", {
+                  "target_url": "http://fixture:8081",
+                  "acknowledged_digest": production_flow["digest"]
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 403
+          else:
+              raise AssertionError("Production browser flow unexpectedly executed")
+
+          with urllib.request.urlopen(BASE + f"/api/projects/{project_id}/runs") as response:
+              historical = json.loads(response.read().decode("utf-8"))
+          assert any(x.get("flow_id") == flow["id"] for x in historical)
+
+          # Simulate a UI rename without changing the business outcome.
+          broken = request(f"/api/projects/{project_id}/flows/{flow['id']}/execute", {
+              "target_url": "http://fixture-renamed:8081",
+              "acknowledged_digest": flow["digest"]
+          })
+          assert broken["status"] == "failed", broken
+          hints = [c["repair"] for c in broken["checks"] if c.get("repair")]
+          assert len(hints) == 1, broken
+          assert hints[0]["original_name"] == "Show details", hints
+          assert hints[0]["proposed_name"] == "Reveal details", hints
+          assert broken["evidence"]["failure_kind"] == "locator_rename_candidate", broken
+          assert broken["evidence"]["failed_step_index"] == hints[0]["step_index"], broken
+          assert broken["evidence"]["worker_lifecycle"] == "single_job_process", broken
+          assert broken["evidence"]["last_path"] == "/", broken
+
+          repair = request(f"/api/projects/{project_id}/flows/{flow['id']}/propose-repair", {
+              "failed_run_id": broken["id"]
+          })
+          assert repair["repaired_from_run_id"] == broken["id"], repair
+          assert repair["repair_target"] == "http://fixture-renamed:8081", repair
+          original_assertions = [x for x in flow["steps"] if x["op"].startswith("assert_")]
+          repaired_assertions = [x for x in repair["steps"] if x["op"].startswith("assert_")]
+          assert original_assertions == repaired_assertions, repair
+          assert repair["digest"] != flow["digest"], repair
+
+          try:
+              request(f"/api/projects/{project_id}/flows/{repair['id']}/execute", {
+                  "target_url": "http://fixture:8081",
+                  "acknowledged_digest": repair["digest"]
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 403, exc.code
+          else:
+              raise AssertionError("Repair replay was accepted against a different origin")
+
+          repaired_run = request(f"/api/projects/{project_id}/flows/{repair['id']}/execute", {
+              "target_url": "http://fixture-renamed:8081",
+              "acknowledged_digest": repair["digest"]
+          })
+          assert repaired_run["status"] == "passed", repaired_run
+          assert repaired_run["evidence"]["failure_kind"] == "none", repaired_run
+          assert repaired_run["evidence"]["job_id"] != broken["evidence"]["job_id"]
+          assert all(x["status"] == "passed" for x in repaired_run["checks"]), repaired_run
+
+          accepted = request(f"/api/projects/{project_id}/flows/{repair['id']}/confirm-repair", {
+              "successful_run_id": repaired_run["id"],
+              "app_revision": "fixture-renamed-v1"
+          })
+          assert accepted["memory_id"], accepted
+          assert accepted["old_name"] == "Show details", accepted
+          assert accepted["new_name"] == "Reveal details", accepted
+
+          with urllib.request.urlopen(BASE + f"/api/projects/{project_id}/repairs") as response:
+              lessons = json.loads(response.read().decode("utf-8"))
+          assert any(x["repaired_flow_id"] == repair["id"] for x in lessons), lessons
+
+          with urllib.request.urlopen(BASE + f"/api/projects/{project_id}/memories") as response:
+              memories = json.loads(response.read().decode("utf-8"))
+          assert any(x["id"] == accepted["memory_id"] and x["kind"] == "lesson"
+                     and x["status"] == "confirmed" for x in memories), memories
+
+          try:
+              request(f"/api/projects/{project_id}/flows/{repair['id']}/confirm-repair", {
+                  "successful_run_id": repaired_run["id"],
+                  "app_revision": "fixture-renamed-v1"
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 409
+          else:
+              raise AssertionError("Repair was accepted more than once")
+
+          # v0.8: create two non-admin accounts with independent sessions.
+          qa_user = request("/api/admin/users", {
+              "email": "qa.ci@example.test",
+              "password": "qa-safely-generated-test-password-01"
+          })
+          reviewer_user = request("/api/admin/users", {
+              "email": "review.ci@example.test",
+              "password": "review-safely-generated-test-password-02"
+          })
+          assert qa_user["global_role"] == "member"
+          assert reviewer_user["global_role"] == "member"
+          assert "password_hash" not in qa_user
+
+          other_project = request("/api/projects", {
+              "name": "Other confidential project",
+              "repo_url": "https://github.com/khoryik96-creator/GQA",
+              "app_type": "api", "stack": "Go"
+          })
+          other_id = other_project["id"]
+          request(f"/api/projects/{project_id}/members", {
+              "email": "qa.ci@example.test", "role": "qa"
+          })
+          request(f"/api/projects/{other_id}/members", {
+              "email": "review.ci@example.test", "role": "viewer"
+          })
+
+          def login_as(email, password):
+              jar = http.cookiejar.CookieJar()
+              opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+              req = urllib.request.Request(
+                  BASE + "/api/auth/login",
+                  data=json.dumps({"email": email, "password": password}).encode("utf-8"),
+                  method="POST",
+                  headers={"Content-Type": "application/json", "Origin": FRONTEND_ORIGIN}
+              )
+              with opener.open(req, timeout=10) as resp:
+                  data = json.load(resp)
+                  assert data["user"]["email"] == email, data
+              return opener
+
+          qa_opener = login_as("qa.ci@example.test","qa-safely-generated-test-password-01")
+          reviewer_opener = login_as("review.ci@example.test","review-safely-generated-test-password-02")
+
+          def as_user(opener, path, payload=None, method="GET"):
+              headers = {}
+              encoded = None
+              if payload is not None:
+                  encoded = json.dumps(payload).encode("utf-8")
+                  headers = {"Content-Type": "application/json", "Origin": FRONTEND_ORIGIN}
+              if method == "DELETE":
+                  headers["Origin"] = FRONTEND_ORIGIN
+              req = urllib.request.Request(
+                  BASE + path, data=encoded, headers=headers, method=method)
+              with opener.open(req, timeout=60) as resp:
+                  return json.load(resp) if resp.status != 204 else None
+
+          def should_deny(opener, path, payload=None, code=403, method="GET"):
+              try:
+                  as_user(opener, path, payload, method)
+              except urllib.error.HTTPError as exc:
+                  assert exc.code == code, (path, exc.code)
+              else:
+                  raise AssertionError(f"Unauthorized access succeeded: {path}")
+
+          qa_projects = as_user(qa_opener,"/api/projects")
+          assert [p["id"] for p in qa_projects] == [project_id], qa_projects
+          assert qa_projects[0]["my_role"] == "qa"
+          should_deny(qa_opener, f"/api/projects/{other_id}/memories",code=404)
+          should_deny(qa_opener, "/api/projects",{
+              "name":"Unapproved project","repo_url":"https://github.com/khoryik96-creator/GQA",
+              "app_type":"api"
+          },code=403,method="POST")
+          should_deny(qa_opener, f"/api/projects/{project_id}/members",code=403)
+          assert as_user(qa_opener,f"/api/projects/{project_id}/plans")
+
+          # Reviewer assigned only to other project; even screenshot URL is scoped.
+          reviewer_projects = as_user(reviewer_opener,"/api/projects")
+          assert len(reviewer_projects)==1
+          assert reviewer_projects[0]["id"]==other_id
+          should_deny(reviewer_opener,f"/api/projects/{project_id}/plans",code=404)
+          should_deny(reviewer_opener,
+              f"/api/runs/{run['id']}/screenshot",code=404)
+          should_deny(reviewer_opener,f"/api/projects/{other_id}/plans",{
+              "prompt":"Try to run QA plans for other project", "environment":"local"
+          },code=403,method="POST")
+          should_deny(reviewer_opener,"/api/admin/users",code=403)
+
+          # A live permission change is effective on the next request.
+          request(f"/api/projects/{project_id}/members",{
+              "email":"review.ci@example.test","role":"reviewer"
+          })
+          assert as_user(reviewer_opener,f"/api/projects/{project_id}/runs")
+          should_deny(reviewer_opener,f"/api/projects/{project_id}/memories",{
+              "kind":"requirement","content":"This write must be denied."
+          },code=403,method="POST")
+          should_deny(reviewer_opener,f"/api/projects/{project_id}/runs",{
+              "plan_id":plan["id"],"target_url":"http://fixture:8081"
+          },code=403,method="POST")
+          request(f"/api/projects/{project_id}/members",{
+              "email":"review.ci@example.test","role":"qa"
+          })
+          qa_memory = as_user(reviewer_opener,
+              f"/api/projects/{project_id}/memories",
+              {"kind":"requirement","content":"Added by newly authorized QA member"},
+              method="POST")
+          assert qa_memory["kind"] == "requirement"
+          revoke = urllib.request.Request(
+              BASE + f"/api/projects/{project_id}/members/{reviewer_user['id']}",
+              method="DELETE",headers={"Origin":FRONTEND_ORIGIN}
+          )
+          with urllib.request.urlopen(revoke) as resp:
+              assert resp.status == 204
+          should_deny(reviewer_opener,f"/api/projects/{project_id}/memories",code=404)
+
+          with urllib.request.urlopen(BASE + f"/api/projects/{project_id}/access-audit") as resp:
+              audit = json.load(resp)
+          assert any(a["action"]=="revoke"
+                     and a["subject_email"]=="review.ci@example.test" for a in audit)
+          # v0.9: account suspension immediately revokes all sessions.
+          qa_second = login_as("qa.ci@example.test", "qa-safely-generated-test-password-01")
+          suspended = request(f"/api/admin/users/{qa_user['id']}/status", {
+              "active": False, "reason": "security_review"
+          })
+          assert suspended["active"] is False, suspended
+          should_deny(qa_opener, "/api/projects", code=401)
+          should_deny(qa_second, "/api/projects", code=401)
+          try:
+              login_as("qa.ci@example.test", "qa-safely-generated-test-password-01")
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 401
+          else:
+              raise AssertionError("Suspended user could log in")
+          reactivated = request(f"/api/admin/users/{qa_user['id']}/status", {
+              "active": True, "reason": "account_recovery"
+          })
+          assert reactivated["active"] is True, reactivated
+
+          # The user changes their own password; every old session is revoked.
+          qa_after_reactivation = login_as(
+              "qa.ci@example.test", "qa-safely-generated-test-password-01")
+          rotation = as_user(qa_after_reactivation, "/api/auth/password", {
+              "current_password": "qa-safely-generated-test-password-01",
+              "new_password": "qa-new-password-for-ci-validation-02"
+          }, method="POST")
+          assert rotation is None
+          should_deny(qa_after_reactivation, "/api/projects", code=401)
+          try:
+              login_as("qa.ci@example.test", "qa-safely-generated-test-password-01")
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 401
+          else:
+              raise AssertionError("Old password remained usable after rotation")
+          qa_rotated = login_as(
+              "qa.ci@example.test", "qa-new-password-for-ci-validation-02")
+          assert as_user(qa_rotated,"/api/projects")[0]["id"] == project_id
+
+          # A global administrator can recover a member's account.
+          reset = request(f"/api/admin/users/{qa_user['id']}/reset-password", {
+              "new_password": "qa-recovered-unique-password-for-ci-03"
+          })
+          assert reset is None
+          should_deny(qa_rotated, "/api/projects", code=401)
+          qa_recovered = login_as(
+              "qa.ci@example.test", "qa-recovered-unique-password-for-ci-03")
+          assert as_user(qa_recovered, "/api/projects")[0]["id"] == project_id
+
+          # Self-service global logout must revoke every device.
+          qa_extra = login_as(
+              "qa.ci@example.test", "qa-recovered-unique-password-for-ci-03")
+          assert as_user(qa_recovered, "/api/auth/revoke-sessions", {}, method="POST") is None
+          should_deny(qa_recovered, "/api/projects", code=401)
+          should_deny(qa_extra, "/api/projects", code=401)
+
+          with urllib.request.urlopen(BASE+"/api/admin/security-audit") as response:
+              security_events = json.load(response)
+          kinds = [e["action"] for e in security_events]
+          assert set(["account_suspended","account_reactivated",
+              "password_change","admin_password_reset"]).issubset(set(kinds))
+          assert all("password_hash" not in e and "new_password" not in e
+                     for e in security_events)
+
+          # Reject authenticated cross-origin writes even with a valid cookie.
+          forged = urllib.request.Request(
+              BASE + f"/api/projects/{project_id}/memories",
+              data=json.dumps({"kind": "lesson", "content": "Injected content"}).encode("utf-8"),
+              method="POST",
+              headers={"Content-Type": "application/json", "Origin": "http://evil.example"},
+          )
+          try:
+              urllib.request.urlopen(forged, timeout=5)
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 403
+          else:
+              raise AssertionError("Unauthorized write origin was accepted")
+
+          logout = urllib.request.Request(
+              BASE + "/api/auth/logout", data=b"{}", method="POST",
+              headers={"Content-Type": "application/json", "Origin": FRONTEND_ORIGIN},
+          )
+          with urllib.request.urlopen(logout, timeout=5) as response:
+              assert response.status == 204
+          try:
+              urllib.request.urlopen(BASE + "/api/projects", timeout=5)
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 401
+          else:
+              raise AssertionError("Logout did not revoke the administrator session")
+
+          print("PASS: memory-aware QA planning, real API/browser checks, screenshot, production block, typed browser flows, reviewable repairs, admin login, CSRF checks and logout")
+          PY
+
+      - name: Stack diagnostics on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 120
+
+      - name: Stop stack
+        if: always()
+        run: |
+          docker compose down -v
+          rm -f .env

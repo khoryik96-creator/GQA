@@ -1,0 +1,13 @@
+node_modules/
+.next/
+dist/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+*.test
+
+# Host broker persistent local job journal (may include fixture test data).
+.gqa-broker-state/

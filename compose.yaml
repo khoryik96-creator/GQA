@@ -1,0 +1,136 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: gqa
+      POSTGRES_USER: gqa
+      POSTGRES_PASSWORD: gqa_local_only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gqa -d gqa"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - gqa_pgdata:/var/lib/postgresql/data
+
+  api:
+    build: ./apps/api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - qa_private
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DATABASE_URL: postgres://gqa:gqa_local_only@db:5432/gqa?sslmode=disable
+      PORT: "8080"
+      ALLOWED_ORIGIN: http://localhost:3000
+      GQA_ADMIN_PASSWORD: ${GQA_ADMIN_PASSWORD:?Set GQA_ADMIN_PASSWORD in .env}
+      GQA_COOKIE_SECURE: ${GQA_COOKIE_SECURE:-false}
+      GQA_RUNNER_URL: http://${GQA_RUNNER_HOST:-runner}:${GQA_RUNNER_PORT:-8090}/run
+      GQA_RUNNER_FLOW_URL: http://${GQA_RUNNER_HOST:-runner}:${GQA_RUNNER_PORT:-8090}/flow
+      GQA_RUNNER_TOKEN: ${GQA_RUNNER_TOKEN:?Set GQA_RUNNER_TOKEN in .env}
+      GQA_JOB_MANAGEMENT_ENABLED: ${GQA_JOB_MANAGEMENT_ENABLED:-false}
+      GQA_SMOKE_TARGETS: http://fixture:8081,http://fixture-renamed:8081
+      GQA_EVIDENCE_DIR: /evidence
+      GQA_LLM_CHAT_COMPLETIONS_URL: ${GQA_LLM_CHAT_COMPLETIONS_URL:-}
+      GQA_LLM_MODEL: ${GQA_LLM_MODEL:-}
+      GQA_LLM_API_KEY: ${GQA_LLM_API_KEY:-}
+      GQA_LLM_SEND_PROJECT_CONTEXT: ${GQA_LLM_SEND_PROJECT_CONTEXT:-false}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - gqa_evidence:/evidence
+    depends_on:
+      db:
+        condition: service_healthy
+      runner:
+        condition: service_healthy
+      fixture:
+        condition: service_healthy
+
+  runner:
+    image: gqa-job:local
+    build: ./apps/runner
+    networks:
+      - qa_private
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
+    shm_size: 256mb
+    environment:
+      GQA_RUNNER_TOKEN: ${GQA_RUNNER_TOKEN:?Set GQA_RUNNER_TOKEN in .env}
+      GQA_SMOKE_TARGETS: http://fixture:8081,http://fixture-renamed:8081
+    depends_on:
+      fixture:
+        condition: service_healthy
+      fixture-renamed:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8090/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  fixture:
+    build: ./apps/fixture
+    networks:
+      - qa_private
+      - qa_execution
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8081/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  fixture-renamed:
+    build: ./apps/fixture
+    networks:
+      - qa_private
+      - qa_execution
+    environment:
+      GQA_FIXTURE_DETAIL_LABEL: Reveal details
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8081/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    networks:
+      - default
+    build:
+      context: ./apps/web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8080
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  gqa_pgdata:
+  gqa_evidence:
+
+# Browser test containers have no external network egress by default.
+# The API uses both networks because it needs GitHub and approved LLM access.
+networks:
+  qa_private:
+    internal: true
+
+  # Only controlled demo fixtures join this container-only network.
+  # The API, database, and long-lived runner do not participate.
+  qa_execution:
+    name: ${GQA_COMPOSE_PROJECT:-gqa}_qa_execution
+    internal: true

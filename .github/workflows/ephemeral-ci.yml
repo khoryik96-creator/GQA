@@ -1,0 +1,225 @@
+name: GQA Experimental Ephemeral Container CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ephemeral-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Generate local CI-only credentials
+        run: |
+          printf 'GQA_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" > .env
+          printf 'GQA_RUNNER_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+      - name: Build controlled local stack and image
+        run: docker compose up --build -d
+      - name: Check isolated execution network
+        run: |
+          docker image inspect gqa-job:local >/dev/null
+          test "$(docker network inspect -f '{{.Internal}}' gqa_qa_execution)" = "true"
+          test "$(docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' gqa_qa_execution | grep -o 'fixture' | wc -l)" -ge 2
+          if docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' gqa_qa_execution | grep -E 'api|runner|db'; then
+            echo "App control services must not join disposable worker network"
+            exit 1
+          fi
+      - name: Start opt-in host broker
+        run: |
+          set -a
+          . ./.env
+          set +a
+          export GQA_HOST_BROKER_BIND=0.0.0.0
+          node apps/host-broker/index.cjs >/tmp/gqa-host-broker.log 2>&1 &
+          echo $! >/tmp/gqa-host-broker.pid
+          for n in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18090/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/gqa-host-broker.log
+          exit 1
+      - name: Connect local API to host broker
+        run: |
+          GQA_RUNNER_HOST=host.docker.internal GQA_RUNNER_PORT=18090 \
+            GQA_JOB_MANAGEMENT_ENABLED=true \
+            docker compose up -d --no-deps --force-recreate api
+      - name: Run real ephemeral browser and API jobs
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request, urllib.error, http.cookiejar, os
+
+          BASE="http://127.0.0.1:8080"
+          cookiejar=http.cookiejar.CookieJar()
+          urllib.request.install_opener(urllib.request.build_opener(
+              urllib.request.HTTPCookieProcessor(cookiejar)))
+          for _ in range(70):
+              try:
+                  with urllib.request.urlopen(BASE+"/healthz",timeout=2) as res:
+                      if res.status==200:break
+              except Exception:
+                  time.sleep(2)
+          else:
+              raise AssertionError("API did not initialize")
+
+          def post(path,body):
+              request=urllib.request.Request(BASE+path,
+                  data=json.dumps(body).encode(),method="POST",
+                  headers={"Content-Type":"application/json",
+                           "Origin":"http://localhost:3000"})
+              with urllib.request.urlopen(request,timeout=65) as response:
+                  return json.load(response)
+
+          with open(".env",encoding="utf-8") as stream:
+              password=next(line.split("=",1)[1].strip() for line in stream
+                  if line.startswith("GQA_ADMIN_PASSWORD="))
+          session=post("/api/auth/login",{"email":"admin@gqa.local","password":password})
+          assert session["authenticated"]
+
+          project=post("/api/projects",{
+              "name":"GQA disposable worker CI",
+              "repo_url":"https://github.com/khoryik96-creator/GQA",
+              "app_type":"fullstack","stack":"Go TypeScript"
+          })
+          project_id=project["id"]
+          plan=post(f"/api/projects/{project_id}/plans",{
+              "prompt":"Verify homepage and API health with safe browser and API checks",
+              "environment":"local"
+          })
+          assert not plan["approval_required"],plan
+          first=post(f"/api/projects/{project_id}/runs",{
+              "plan_id":plan["id"],"target_url":"http://fixture:8081"
+          })
+          assert first["status"]=="passed",first
+          assert first["screenshot_available"],first
+          assert first["evidence"]["worker_lifecycle"]=="ephemeral_container",first
+          assert first["evidence"]["job_id"],first
+
+          flow=post(f"/api/projects/{project_id}/flows",{
+              "plan_id":plan["id"],
+              "prompt":"Open the homepage, click Show details and verify the details panel is visible"
+          })
+          second=post(f"/api/projects/{project_id}/flows/{flow['id']}/execute",{
+              "target_url":"http://fixture:8081",
+              "acknowledged_digest":flow["digest"]
+          })
+          assert second["status"]=="passed",second
+          assert second["evidence"]["worker_lifecycle"]=="ephemeral_container",second
+          assert second["evidence"]["job_id"]!=first["evidence"]["job_id"],(first,second)
+          assert second["screenshot_available"],second
+          assert len(second["checks"])>=4,second
+
+          # The API must persist the container execution identity.
+          with urllib.request.urlopen(BASE+f"/api/projects/{project_id}/runs") as response:
+              saved=json.load(response)
+          assert any(v["id"]==second["id"] and
+              v["evidence"]["worker_lifecycle"]=="ephemeral_container" for v in saved)
+          with urllib.request.urlopen(BASE+"/api/admin/broker-jobs") as response:
+              broker_jobs=json.load(response)
+          assert len(broker_jobs)>=2, broker_jobs
+          assert all(j["status"]=="passed" for j in broker_jobs), broker_jobs
+          assert all("spec" not in j and "target_url" not in j for j in broker_jobs)
+          print("PASS: separate disposable containers, persisted evidence and admin job monitoring")
+          PY
+      - name: Verify durable asynchronous queue and restart recovery
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request, urllib.error, os
+
+          BASE="http://127.0.0.1:18090"
+          with open(".env",encoding="utf-8") as f:
+              token=next(row.split("=",1)[1].strip() for row in f
+                         if row.startswith("GQA_RUNNER_TOKEN="))
+          def call(path,data=None):
+              req=urllib.request.Request(BASE+path,method="POST" if data is not None else "GET",
+                  data=json.dumps(data).encode() if data is not None else None,
+                  headers={"X-GQA-Runner-Token":token,"Content-Type":"application/json"})
+              with urllib.request.urlopen(req,timeout=65) as res:
+                  return res.status,json.load(res)
+
+          with urllib.request.urlopen(BASE+"/healthz",timeout=5) as res:
+              assert json.load(res)["mode"]=="ephemeral_container"
+          try:
+              urllib.request.urlopen(BASE+"/jobs",timeout=5)
+          except urllib.error.HTTPError as exc:
+              assert exc.code==401
+          else:
+              raise AssertionError("Broker job status was anonymously accessible")
+
+          status,queued=call("/jobs",{
+              "kind":"smoke","target_url":"http://fixture:8081",
+              "run_api":True,"run_web":False})
+          assert status==202 and queued["id"],queued
+          for _ in range(60):
+              _,tracked=call("/jobs/"+queued["id"])
+              if tracked["status"] in ("passed","failed","cancelled","interrupted"):break
+              time.sleep(0.5)
+          else:
+              raise AssertionError("Asynchronous job never reached terminal status")
+          assert tracked["status"]=="passed",tracked
+          assert tracked["check_count"]>=1,tracked
+
+          assert os.path.isfile(".gqa-broker-state/jobs.json")
+          with open(".gqa-broker-state/jobs.json",encoding="utf-8") as f:
+              journal=json.load(f)
+          assert any(j["id"]==queued["id"] and j["status"]=="passed" for j in journal)
+          print("PASS: async queue, durable on-disk journal and authenticated job status")
+          PY
+          # Restart the host process and prove the completed job remains recorded.
+          kill "$(cat /tmp/gqa-host-broker.pid)"
+          sleep 2
+          set -a
+          . ./.env
+          set +a
+          export GQA_HOST_BROKER_BIND=0.0.0.0
+          node apps/host-broker/index.cjs >>/tmp/gqa-host-broker.log 2>&1 &
+          echo $! >/tmp/gqa-host-broker.pid
+          restarted=0
+          for n in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18090/healthz >/dev/null; then
+              restarted=1
+              break
+            fi
+            sleep 1
+          done
+          test "$restarted" = "1"
+          python3 - <<'PY'
+          import urllib.request, json
+          with open(".env",encoding="utf-8") as stream:
+              token=next(line.split("=",1)[1].strip() for line in stream
+                  if line.startswith("GQA_RUNNER_TOKEN="))
+          req=urllib.request.Request("http://127.0.0.1:18090/jobs",
+              headers={"X-GQA-Runner-Token":token})
+          with urllib.request.urlopen(req,timeout=5) as response:
+              statuses=json.load(response)
+          assert any(job["status"]=="passed" for job in statuses),statuses
+          print("PASS: persisted broker jobs restored after full process restart")
+          PY
+      - name: Confirm no disposable job containers remain
+        run: |
+          if test -n "$(docker ps -aq --filter 'label=com.gqa.component=ephemeral-job')"; then
+            echo "A disposable QA container was left behind"
+            docker ps -a --filter 'label=com.gqa.component=ephemeral-job'
+            exit 1
+          fi
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          cat /tmp/gqa-host-broker.log 2>/dev/null || true
+          docker compose logs --no-color --tail 100 || true
+          docker ps -a --filter 'label=com.gqa.component=ephemeral-job'
+      - name: Cleanup
+        if: always()
+        run: |
+          if test -f /tmp/gqa-host-broker.pid; then
+            kill "$(cat /tmp/gqa-host-broker.pid)" || true
+          fi
+          docker compose down -v || true
+          rm -f .env

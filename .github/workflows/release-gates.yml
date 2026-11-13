@@ -1,0 +1,29 @@
+name: GQA Release Candidate Gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  release-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check safe defaults and release documentation
+        run: node scripts/release-gates.mjs
+      - name: Prevent tracked developer secrets and runtime job journals
+        run: |
+          if git ls-files | grep -E '(^|/)(\.env$|jobs\.json$|gqa_session$|.*\.pem$|.*\.key$)'; then
+            echo "Tracked secret or local runtime state detected"
+            exit 1
+          fi
+          echo "No known local secret file types tracked"
+      - name: Check whitespace errors in changed source
+        run: git diff --check HEAD^ HEAD

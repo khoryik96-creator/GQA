@@ -1,5 +1,169 @@
 # GQA — AI Principal QA Command Center
 
-A Go + TypeScript platform for project-aware QA planning, persistent engineering memory, and eventually safe automated test execution.
+**Release candidate:** v0.11 RC1 · **Status:** local developer prototype · **Production readiness:** not yet approved
 
-> Initial repository bootstrap. Implementation is developed through reviewed pull requests.
+GQA is a project-aware quality assurance command center built with a Go REST
+API, PostgreSQL, a Next.js/TypeScript dashboard and isolated Node/Playwright
+test runners. It can plan QA coverage against explicit project context,
+inspect public GitHub repositories, run restricted demo-fixture checks,
+review browser flows, and retain test results and verified corrections.
+
+> **Do not expose GQA publicly or test untrusted websites.** The default
+> Docker stack is intended for trusted local use. The experimental Docker
+> execution broker can control your host's Docker engine and must stay
+> firewall-protected. It is not a safe external customer-testing service.
+
+## Current capabilities
+
+| Area | What actually works in v0.11 |
+| --- | --- |
+| Projects and memory | Multiple projects, confirmed/corrected requirements and project-level QA lessons |
+| Planning | Deterministic principal-QA agent routing and structured test specifications; optional configured LLM provider |
+| Repository inspection | Read-only inspection of **public** GitHub repositories |
+| Test execution | Approved API GET and browser smoke tests against bundled local fixtures |
+| Browser flows | Reviewable, typed Playwright actions with exact-digest acknowledgement and stored screenshots |
+| Repair suggestions | Human-reviewed accessible-name locator corrections, verified by replay without relaxing assertions |
+| Access control | Individual password-hashed accounts, per-project owner / QA / reviewer / viewer roles, administrator controls |
+| Default worker | One-shot test processes inside a resource-limited, private-network Docker worker |
+| Optional broker | Fresh disposable Docker containers for bundled fixtures, with FIFO queue, cancellation and restart recovery |
+
+Not implemented: autonomous end-to-end testing of arbitrary websites, native
+mobile testing, distributed workers, real external staging egress controls,
+enterprise organizations/SSO/MFA, production security review or hardened VM
+isolation. The initial planner **does not require an LLM**; without a configured
+provider it uses explicit deterministic rules.
+
+## Get started locally
+
+Requirements: **Docker Desktop / Docker Engine with Compose**, Git and
+sufficient memory to start PostgreSQL, Next.js, Go and Chromium containers.
+Windows PowerShell commands:
+
+```powershell
+git clone -b release/gqa-v011-rc1 https://github.com/khoryik96-creator/GQA.git
+cd GQA
+Copy-Item .env.example .env
+notepad .env
+```
+
+Fill in **both** `GQA_ADMIN_PASSWORD` and `GQA_RUNNER_TOKEN` with separate
+unique, random secrets. The initial administrator password must be **16–72
+bytes**, and the runner token must be at least 24 characters. Never commit
+`.env`, share the runner token or place credentials inside project memory.
+
+Then start the default, **non-experimental** stack:
+
+```powershell
+docker compose up --build -d
+docker compose ps
+```
+
+Open **http://localhost:3000**. Log in with:
+
+- Email: `admin@gqa.local`
+- Password: the value you configured for `GQA_ADMIN_PASSWORD` on the
+  **first** startup of this database.
+
+The admin account is bootstrapped only when the database has no accounts.
+Changing `GQA_ADMIN_PASSWORD` in `.env` after account creation does **not**
+reset the existing account. Use **Account security** in the dashboard to
+change an existing account password. Existing v0.6 login sessions must sign
+in again after the v0.8 user migration.
+
+The Go API is at **http://localhost:8080** (loopback only).
+
+## First verified QA run
+
+1. Sign in as administrator and create a project. Supply a **public**
+   GitHub repository URL and select its application type.
+2. Optionally inspect the repository and record confirmed requirements or
+   project conventions under **Project Memory**.
+3. Generate a QA plan for a homepage or API health check; review the
+   selected agents, environment and approval warnings.
+4. Execute approved smoke checks against the bundled test fixture
+   `http://fixture:8081`. Review the saved checks and screenshot.
+5. Under **Browser Flow Studio**, draft a test that clicks **Show details**,
+   review its steps and acknowledge its exact digest before running it.
+6. To try controlled locator repair, use the second fixture origin
+   `http://fixture-renamed:8081` and review the failed action, proposed
+   correction, successful replay and optional recorded QA lesson.
+
+Production and high-impact plans cannot execute active tests in this build.
+A real application failure is never automatically marked as passing.
+
+## Team roles and account security
+
+A global administrator can provision user accounts and create projects.
+Within a project, an **owner** can administer members and run tests, a
+**QA engineer** can write and execute tests, a **reviewer** can approve
+verified corrections, and a **viewer** has read-only access.
+
+Account creation is **administrator-only**: no self-registration.
+The **Team Access** panel allows member role changes and audit history.
+The **Account security** panel supports password changes and revocation
+of sessions across browsers. Administrators may suspend or recover ordinary
+member accounts. Requests are protected with server-enforced project
+permissions and origin-checked cookie sessions.
+
+## AI planning is optional
+
+The default QA planner is deterministic and labelled as such in the UI.
+An OpenAI-compatible chat completions provider can be configured through
+`GQA_LLM_CHAT_COMPLETIONS_URL`, `GQA_LLM_MODEL` and `GQA_LLM_API_KEY`.
+`GQA_LLM_SEND_PROJECT_CONTEXT` controls whether project context may be sent
+to the provider and defaults to `false`. Do not send sensitive company
+information to an external provider without authorization.
+
+The specialist execution engine and LLM planner are separate. Connecting
+a model does not grant it autonomous shell commands or permission to run
+tests against external targets.
+
+## Experimental disposable-container mode (opt-in)
+
+The default runner uses fresh Node processes in a dedicated Compose
+container. The v0.10–v0.11 alternative launches a **new restricted Docker
+container per test** using a **host-side** broker with access to the host's
+Docker CLI. The broker is privileged, can reach the host Docker engine and
+requires a firewall-protected host interface; it does **not** run inside a
+GQA app container with a mounted Docker socket.
+
+This optional mode currently permits only the two built-in demo fixtures
+on the isolated `gqa_qa_execution` network. It does **not** support
+external websites, production applications or untrusted content.
+
+For full PowerShell startup, reversal and job-management endpoints, see
+[the v0.10–v0.11 operating instructions](docs/version-history.md). The
+administrative job monitor additionally requires
+`GQA_JOB_MANAGEMENT_ENABLED=true` and the fixed host-broker address.
+
+## Development and verification
+
+| Component | Command |
+| --- | --- |
+| Go unit tests | `cd apps/api && go test ./...` |
+| Web typecheck/build | `cd apps/web && npm install && npm run lint:types && npm run build` |
+| Browser runner tests | `cd apps/runner && npm test` |
+| Host broker tests | `cd apps/host-broker && npm test` |
+| Full stack | `docker compose up --build -d` |
+
+GitHub Actions workflows cover the foundation, Docker integration
+and experimental disposable-container integration. A passing CI run is
+not a security certification or approval to deploy customer-facing GQA.
+
+The project is under active development, and **PRs #1–#11 are individual
+feature-review milestones**. The consolidated release candidate is
+[PR #12](https://github.com/khoryik96-creator/GQA/pull/12) targeting
+`main`. It is intentionally a draft and does not automatically publish
+or deploy anything.
+
+## Documentation
+
+- [Historical milestone instructions, v0.1–v0.11](docs/version-history.md)
+- [Release acceptance checklist](docs/RELEASE_CHECKLIST.md)
+- [Architecture and threat boundaries](docs/architecture/)
+- [Security policy and reporting](SECURITY.md)
+
+**Data retention:** local PostgreSQL and screenshots persist across ordinary
+`docker compose down` / `up`. Running `docker compose down -v` **deletes
+named volumes** and can destroy local projects, accounts and evidence.
+Back up your volumes before resetting the stack.
