@@ -1,9 +1,9 @@
 FROM golang:1.27.4-alpine AS build
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
 COPY . .
-RUN go mod tidy
-RUN CGO_ENABLED=0 go build -o /out/gqa-api .
+RUN CGO_ENABLED=0 go build -mod=readonly -trimpath -o /out/gqa-api .
 
 FROM alpine:3.24
 RUN adduser -D -u 10001 gqa && mkdir -p /evidence && chown gqa:gqa /evidence
