@@ -195,6 +195,21 @@ For full PowerShell startup, reversal and job-management endpoints, see
 administrative job monitor additionally requires
 `GQA_JOB_MANAGEMENT_ENABLED=true` and the fixed host-broker address.
 
+## v0.14 — Numbered database migrations
+
+The short-lived privileged migration service now applies numbered SQL migrations
+from `db-migrate/versions/`, recording checksums in
+`public.gqa_schema_migrations`. Migration 0001 is an idempotent baseline
+for existing v0.13 databases and new installations. Each migration is applied
+transactionally together with its ledger entry; a changed migration checksum
+or an unknown newer database version blocks startup. The runtime API continues
+to use the least-privileged `gqa_app` role.
+
+**Back up PostgreSQL and screenshot evidence before upgrading.** There is no
+automatic schema rollback: restore matching backed-up data and code revisions,
+or use a tested forward recovery procedure. See
+[Database Migration and Recovery Guide](docs/DATABASE_MIGRATIONS.md).
+
 ## Development and verification
 
 | Component | Command |
