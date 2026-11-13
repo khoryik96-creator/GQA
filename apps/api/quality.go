@@ -4,7 +4,6 @@ import (
  "crypto/sha256"
  "encoding/hex"
  "encoding/json"
- "fmt"
  "net/http"
  "sort"
  "strings"
@@ -27,50 +26,50 @@ type QualityRun struct {
 }
 
 type QualityPoint struct {
- RunID string §json:"run_id"§
- Status string §json:"status"§
- StartedAt time.Time §json:"started_at"§
+ RunID string `json:"run_id"`
+ Status string `json:"status"`
+ StartedAt time.Time `json:"started_at"`
 }
 
 type QualityCase struct {
- ID string §json:"id"§
- Label string §json:"label"§
- Kind string §json:"kind"§
- TargetURL string §json:"target_url"§
- LatestRunID string §json:"latest_run_id"§
- PreviousRunID string §json:"previous_run_id,omitempty"§
- Status string §json:"status"§
- PreviousStatus string §json:"previous_status,omitempty"§
- Transition string §json:"transition"§
- FailingChecks []string §json:"failing_checks"§
- NewlyFailingChecks []string §json:"newly_failing_checks"§
- RecoveredChecks []string §json:"recovered_checks"§
- OutcomeSwitches int §json:"outcome_switches"§
- UnstablePattern bool §json:"unstable_pattern"§
- Observations int §json:"observations"§
- History []QualityPoint §json:"history"§
- LastRunAt time.Time §json:"last_run_at"§
+ ID string `json:"id"`
+ Label string `json:"label"`
+ Kind string `json:"kind"`
+ TargetURL string `json:"target_url"`
+ LatestRunID string `json:"latest_run_id"`
+ PreviousRunID string `json:"previous_run_id,omitempty"`
+ Status string `json:"status"`
+ PreviousStatus string `json:"previous_status,omitempty"`
+ Transition string `json:"transition"`
+ FailingChecks []string `json:"failing_checks"`
+ NewlyFailingChecks []string `json:"newly_failing_checks"`
+ RecoveredChecks []string `json:"recovered_checks"`
+ OutcomeSwitches int `json:"outcome_switches"`
+ UnstablePattern bool `json:"unstable_pattern"`
+ Observations int `json:"observations"`
+ History []QualityPoint `json:"history"`
+ LastRunAt time.Time `json:"last_run_at"`
 }
 
 type QualityDay struct {
- Date string §json:"date"§
- Passed int §json:"passed"§
- Failed int §json:"failed"§
+ Date string `json:"date"`
+ Passed int `json:"passed"`
+ Failed int `json:"failed"`
 }
 
 type QualityReport struct {
- SampleRuns int §json:"sample_runs"§
- SampleLimit int §json:"sample_limit"§
- Truncated bool §json:"truncated"§
- Scenarios int §json:"scenarios"§
- Passing int §json:"passing"§
- Failing int §json:"failing"§
- Regressions int §json:"regressions"§
- Recoveries int §json:"recoveries"§
- PersistentFailures int §json:"persistent_failures"§
- UnstablePatterns int §json:"unstable_patterns"§
- Cases []QualityCase §json:"cases"§
- Daily []QualityDay §json:"daily"§
+ SampleRuns int `json:"sample_runs"`
+ SampleLimit int `json:"sample_limit"`
+ Truncated bool `json:"truncated"`
+ Scenarios int `json:"scenarios"`
+ Passing int `json:"passing"`
+ Failing int `json:"failing"`
+ Regressions int `json:"regressions"`
+ Recoveries int `json:"recoveries"`
+ PersistentFailures int `json:"persistent_failures"`
+ UnstablePatterns int `json:"unstable_patterns"`
+ Cases []QualityCase `json:"cases"`
+ Daily []QualityDay `json:"daily"`
 }
 
 const qualityRunLimit=200
@@ -208,12 +207,12 @@ func summarizeQuality(records []QualityRun,limit int) QualityReport{
 
 func (s *server) quality(w http.ResponseWriter,r *http.Request){
  projectID,ok:=validProjectID(w,r);if !ok{return}
- rows,err:=s.db.Query(r.Context(),§
+ rows,err:=s.db.Query(r.Context(),`
   SELECT id::text,plan_id::text,COALESCE(flow_id::text,''),
     execution_kind,target_url,status,checks,started_at
   FROM test_runs
   WHERE project_id=$1::uuid AND status IN ('passed','failed')
-  ORDER BY started_at DESC,id DESC LIMIT $2§,projectID,qualityRunLimit+1)
+  ORDER BY started_at DESC,id DESC LIMIT $2`,projectID,qualityRunLimit+1)
  if err!=nil{fail(w,500,"Unable to retrieve quality history");return}
  defer rows.Close()
  input:=[]QualityRun{}
@@ -236,4 +235,3 @@ func (s *server) quality(w http.ResponseWriter,r *http.Request){
  writeJSON(w,http.StatusOK,result)
 }
 
-var _=fmt.Sprintf
