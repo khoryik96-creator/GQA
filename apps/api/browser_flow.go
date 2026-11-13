@@ -37,10 +37,22 @@ func (s *server) browserFlows(w http.ResponseWriter,r *http.Request){
   projectID,ok:=validProjectID(w,r)
   if !ok{return}
   if r.Method==http.MethodGet{
-    rows,err:=s.db.Query(r.Context(),`
+    limit,cursor,paged,pageErr:=parseHistoryPageRequest(r)
+    if pageErr!=nil{fail(w,400,pageErr.Error());return}
+    const selectFlows=`
       SELECT id::text,project_id::text,plan_id::text,prompt,objective,steps,digest,generation_mode,warning,
         COALESCE(repaired_from_flow_id::text,''),COALESCE(repaired_from_run_id::text,''),repair_target,created_at
-      FROM browser_flows WHERE project_id=$1::uuid ORDER BY created_at DESC LIMIT 30`,projectID)
+      FROM browser_flows WHERE project_id=$1::uuid`
+    var rows pgx.Rows
+    var err error
+    if paged{
+      rows,err=s.db.Query(r.Context(),selectFlows+
+        " AND ($2::timestamptz IS NULL OR (created_at,id)<($2::timestamptz,$3::uuid)) ORDER BY created_at DESC,id DESC LIMIT $4",
+        projectID,historyCursorTime(cursor),historyCursorID(cursor),limit+1)
+    }else{
+      rows,err=s.db.Query(r.Context(),selectFlows+
+        " ORDER BY created_at DESC,id DESC LIMIT 30",projectID)
+    }
     if err!=nil{fail(w,500,"Unable to list browser flows");return}
     defer rows.Close()
     flows:=[]BrowserFlow{}
@@ -56,7 +68,15 @@ func (s *server) browserFlows(w http.ResponseWriter,r *http.Request){
       flows=append(flows,flow)
     }
     if rows.Err()!=nil{fail(w,500,"Unable to read browser flows");return}
-    writeJSON(w,200,flows)
+    if paged{
+      nextCursor:=""
+      if len(flows)>limit{
+        flows=flows[:limit]
+        last:=flows[len(flows)-1]
+        nextCursor=historyNextCursor(last.CreatedAt,last.ID)
+      }
+      writeJSON(w,200,listPage[BrowserFlow]{Items:flows,NextCursor:nextCursor})
+    }else{writeJSON(w,200,flows)}
     return
   }
 
