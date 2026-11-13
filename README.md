@@ -223,6 +223,17 @@ software bill of materials for each image. See
 These measures improve repeatability and visibility but **do not** sign images,
 pin every container base digest, or certify external-customer deployment.
 
+## v0.15 — Frontend resilience and performance
+
+The command center now aborts stale project-data requests, preserves successful
+resource results if an adjacent endpoint fails, and offers an explicit retry.
+The Browser Flow Studio reuses the parent run history instead of fetching it
+twice, while project switches clear pending memory corrections immediately.
+Heavy account, team, regression and flow panels are loaded as separate client
+chunks. See [Frontend Performance and Verification](docs/FRONTEND_PERFORMANCE.md).
+Server-side pagination, account-aware query caching and measured load testing
+remain future work.
+
 ## Development and verification
 
 | Component | Command |
