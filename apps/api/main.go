@@ -136,6 +136,7 @@ func main() {
   mux.HandleFunc("GET /api/admin/security-audit",auth.admin(s.accountSecurityAudit))
   mux.HandleFunc("GET /api/admin/broker-jobs",auth.admin(s.brokerJobs))
   mux.HandleFunc("GET /api/admin/broker-jobs/{id}",auth.admin(s.brokerJobs))
+  mux.HandleFunc("GET /api/admin/broker-jobs/{id}/screenshot",auth.admin(s.brokerScreenshot))
   mux.HandleFunc("POST /api/admin/broker-jobs/{id}/cancel",auth.admin(s.brokerJobs))
   mux.HandleFunc("GET /api/projects/{id}/members",auth.project("manage",s.projectMembers))
   mux.HandleFunc("POST /api/projects/{id}/members",auth.project("manage",s.projectMembers))
