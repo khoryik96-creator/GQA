@@ -1,6 +1,6 @@
 # GQA — AI Principal QA Command Center
 
-**Current main:** v0.11 local prototype · **Development:** v0.12 Regression Intelligence · **Production readiness:** not approved
+**Current main:** v0.11 · **Draft branches:** v0.12 Regression Intelligence → v0.13 Reliability Hardening · **Production readiness:** not approved
 
 GQA is a project-aware quality assurance command center built with a Go REST
 API, PostgreSQL, a Next.js/TypeScript dashboard and isolated Node/Playwright
@@ -15,7 +15,7 @@ review browser flows, and retain test results and verified corrections.
 
 ## Current capabilities
 
-| Area | What actually works in v0.11 |
+| Area | Available in v0.11, or in the linked draft branches |
 | --- | --- |
 | Projects and memory | Multiple projects, confirmed/corrected requirements and project-level QA lessons |
 | Planning | Deterministic principal-QA agent routing and structured test specifications; optional configured LLM provider |
@@ -46,9 +46,17 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Fill in **both** `GQA_ADMIN_PASSWORD` and `GQA_RUNNER_TOKEN` with separate
-unique, random secrets. The initial administrator password must be **16–72
-bytes**, and the runner token must be at least 24 characters. Never commit
+Fill in **three** independent secrets: `GQA_ADMIN_PASSWORD`,
+`GQA_RUNNER_TOKEN` and `GQA_DB_APP_PASSWORD` (at least 32 URL-safe
+characters). On existing installations, add the new database application
+password to your existing `.env`; do not replace or remove the PostgreSQL
+volume. A one-shot migration container creates the limited application
+database role while preserving existing records. The initial administrator password must be **16–72
+bytes**, and the runner token must be at least 24 characters. **On existing
+installations, preserve your original PostgreSQL bootstrap password**.
+The migration task uses the original database owner and creates a new
+limited `gqa_app` runtime account. Do not attempt to change the existing
+PostgreSQL role simply by updating `GQA_DB_ADMIN_PASSWORD` in `.env`. Never commit
 `.env`, share the runner token or place credentials inside project memory.
 
 Then start the default, **non-experimental** stack:
@@ -107,6 +115,36 @@ and never executes additional tests to produce the report.
 
 The endpoint `GET /api/projects/{id}/quality` is read-only and uses the
 same server-side project role restrictions as other project history.
+In the v0.13 branch, worker timeouts, invalid runner evidence and Docker
+failures are reported separately as **infrastructure interruptions**, never
+automatically classified as product regressions.
+
+## v0.13 — Reliability hardening (draft branch)
+
+The [hardening PR #14](https://github.com/khoryik96-creator/GQA/pull/14)
+builds on [draft v0.12 PR #13](https://github.com/khoryik96-creator/GQA/pull/13).
+It strengthens post-action assertions, complete worker-evidence validation,
+runner concurrency, broker journal ownership, async result retention,
+abandoned-run reconciliation, audit attribution, per-account login throttling,
+opt-in evidence retention, safer database privileges and a separated
+database network. The status of **each audited finding**, along with
+residual limitations, is in [Hardening Audit](docs/HARDENING_AUDIT.md).
+
+Test execution and model planning are rate-limited per project and account
+in the single-node API. Default local runtime retains a fixed fixture
+allowlist. The administrator can optionally view durable broker checks
+and screenshots from the job monitor. The broker remains privileged and
+**must not** be exposed publicly.
+
+For screenshot retention, `GQA_EVIDENCE_RETENTION_DAYS=0` (default)
+disables automatic deletion. A positive value enables deletion of old
+screenshots, not project run records; use only after agreeing retention
+requirements and verifying backups.
+
+**This branch is not a production security certification.** High-assurance
+execution isolation, multi-instance coordination, account recovery,
+application-build attestation and enterprise tenancy still require separate
+work.
 
 ## Team roles and account security
 
@@ -157,21 +195,23 @@ administrative job monitor additionally requires
 
 | Component | Command |
 | --- | --- |
-| Go unit tests | `cd apps/api && go test ./...` |
+| Go unit tests and static analysis | `cd apps/api && go test ./... && go vet ./...` |
 | Web typecheck/build | `cd apps/web && npm install && npm run lint:types && npm run build` |
 | Browser runner tests | `cd apps/runner && npm test` |
 | Host broker tests | `cd apps/host-broker && npm test` |
 | Full stack | `docker compose up --build -d` |
 
-GitHub Actions workflows cover the foundation, Docker integration
-and experimental disposable-container integration. A passing CI run is
+GitHub Actions workflows cover the foundation, Docker integration,
+experimental disposable-container integration, release safety rules and
+additional dependency/static security checks. A passing CI run is
 not a security certification or approval to deploy customer-facing GQA.
 
 GQA v0.11 was consolidated into `main` through
 [merged PR #12](https://github.com/khoryik96-creator/GQA/pull/12).
 Further development is reviewed separately; the v0.12 regression analytics
-implementation is a [draft PR #13](https://github.com/khoryik96-creator/GQA/pull/13)
-and has not been merged.
+implementation is [draft PR #13](https://github.com/khoryik96-creator/GQA/pull/13),
+with its hardening changes in [draft PR #14](https://github.com/khoryik96-creator/GQA/pull/14).
+Neither draft has been merged.
 
 ## Documentation
 
@@ -179,6 +219,7 @@ and has not been merged.
 - [Release acceptance checklist](docs/RELEASE_CHECKLIST.md)
 - [Architecture and threat boundaries](docs/architecture/)
 - [Security policy and reporting](SECURITY.md)
+- [Audit finding remediation and residual risks](docs/HARDENING_AUDIT.md)
 
 **Data retention:** local PostgreSQL and screenshots persist across ordinary
 `docker compose down` / `up`. Running `docker compose down -v` **deletes

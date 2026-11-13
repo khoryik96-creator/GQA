@@ -8,7 +8,6 @@ import (
   "encoding/json"
   "errors"
   "fmt"
-  "io"
   "net/http"
   "net/url"
   "os"
@@ -129,9 +128,10 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
 
   var run TestRun
   run.ProjectID=id;run.PlanID=input.PlanID;run.TargetURL=target
+  actor,_:=currentAccount(r)
   err=s.db.QueryRow(r.Context(),`
-    INSERT INTO test_runs(project_id,plan_id,target_url,status)
-    VALUES ($1::uuid,$2::uuid,$3,'running') RETURNING id::text,started_at`,id,input.PlanID,target).Scan(&run.ID,&run.StartedAt)
+    INSERT INTO test_runs(project_id,plan_id,target_url,status,initiated_by)
+    VALUES ($1::uuid,$2::uuid,$3,'running',$4::uuid) RETURNING id::text,started_at`,id,input.PlanID,target,actor.ID).Scan(&run.ID,&run.StartedAt)
   if err!=nil{fail(w,500,"Unable to initialize run");return}
   run.Status="running"
   run.ExecutionKind="smoke"
@@ -139,24 +139,26 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   body,_:=json.Marshal(map[string]any{"target_url":target,"run_api":runAPI,"run_web":runWeb})
   runnerURL:=os.Getenv("GQA_RUNNER_URL")
   if runnerURL==""{runnerURL="http://runner:8090/run"}
-  ctx,cancel:=context.WithTimeout(r.Context(),30*time.Second)
+  ctx,cancel:=context.WithTimeout(context.Background(),75*time.Second)
   defer cancel()
   req,err:=http.NewRequestWithContext(ctx,http.MethodPost,runnerURL,bytes.NewReader(body))
   if err!=nil{fail(w,500,"Unable to initialize runner request");return}
   req.Header.Set("Content-Type","application/json")
   req.Header.Set("X-GQA-Runner-Token",os.Getenv("GQA_RUNNER_TOKEN"))
-  resp,err:=(&http.Client{Timeout:30*time.Second}).Do(req)
+  resp,err:=(&http.Client{Timeout:70*time.Second,CheckRedirect:func(*http.Request,[]*http.Request)error{return http.ErrUseLastResponse}}).Do(req)
   reply:=workerReply{Checks:[]SmokeCheck{}}
   if err==nil{
     defer resp.Body.Close()
     if resp.StatusCode==http.StatusOK{
-      err=json.NewDecoder(io.LimitReader(resp.Body,2<<20)).Decode(&reply)
+      reply,err=decodeWorkerReply(resp.Body)
     }else{err=fmt.Errorf("runner returned HTTP %d",resp.StatusCode)}
   }
-  if err!=nil{
-    reply.Checks=[]SmokeCheck{{Name:"Runner availability",Status:"failed",Detail:"Runner unavailable or returned invalid evidence",DurationMS:0}}
-  }
-  run.Checks=reply.Checks
+  if err!=nil {
+     reply=recordedRunnerFailure("Runner availability")
+   }else if !validatedSmokeChecks(reply.Checks,runAPI,runWeb){
+     reply=invalidEvidence()
+   }
+   run.Checks=reply.Checks
   if len(run.Checks)==0{run.Checks=[]SmokeCheck{{Name:"Runner evidence",Status:"failed",Detail:"Runner produced no checks"}}}
   run.Status="passed"
   for _,check:=range run.Checks{if check.Status!="passed"{run.Status="failed";break}}
@@ -176,8 +178,10 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   }
   resultJSON,_:=json.Marshal(run.Checks)
   evidenceJSON,_:=json.Marshal(run.Evidence)
-  err=s.db.QueryRow(r.Context(),`
-    UPDATE test_runs SET checks=$2::jsonb,status=$3,screenshot_available=$4,
+  finalCtx,finishCancel:=context.WithTimeout(context.Background(),10*time.Second)
+   defer finishCancel()
+   err=s.db.QueryRow(finalCtx,`
+     UPDATE test_runs SET checks=$2::jsonb,status=$3,screenshot_available=$4,
     evidence=$5::jsonb,finished_at=now() WHERE id=$1::uuid RETURNING finished_at`,
     run.ID,string(resultJSON),run.Status,run.ScreenshotAvailable,string(evidenceJSON)).Scan(&run.FinishedAt)
   if err!=nil{fail(w,500,"Run completed but could not save results");return}

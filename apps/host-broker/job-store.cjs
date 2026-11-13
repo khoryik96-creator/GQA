@@ -47,6 +47,53 @@ class JobStore {
     this.dir=dir;
     this.file=path.join(dir,"jobs.json");
     this.jobs=[];
+    this.leasePath=path.join(dir,"broker.lease");
+    this.leaseToken=null;
+  }
+  // Exclusive ownership is required before loading or executing journal
+  // entries. A second broker must not replay the same queued work, even if
+  // it binds a different port.
+  acquireLease(){
+    fs.mkdirSync(this.dir,{recursive:true,mode:0o700});
+    const nonce=crypto.randomBytes(16).toString("hex");
+    const claim=()=>{
+      const fd=fs.openSync(this.leasePath,"wx",0o600);
+      try{
+        fs.writeSync(fd,JSON.stringify({pid:process.pid,nonce}));
+        fs.fsyncSync(fd);
+      }finally{fs.closeSync(fd)}
+    };
+    try{claim();}
+    catch(err){
+      if(err.code!=="EEXIST")throw err;
+      if(fs.lstatSync(this.leasePath).isSymbolicLink())throw new Error("Unsafe broker lease link");
+      let previous;
+      try{previous=JSON.parse(fs.readFileSync(this.leasePath,"utf8"));}
+      catch{throw new Error("Unverifiable broker lease; inspect it manually");}
+      if(!Number.isInteger(previous.pid)||previous.pid<=0||
+         typeof previous.nonce!=="string"||!/^[a-f0-9]{32}$/.test(previous.nonce)){
+        throw new Error("Invalid broker lease; inspect it manually");
+      }
+      try{process.kill(previous.pid,0);throw new Error("Another broker still holds the job journal lease");}
+      catch(alive){
+        if(alive.code!=="ESRCH")throw alive;
+      }
+      // Dead PID. Reclaim the known stale lease; wx still arbitrates
+      // concurrent startups so only one claimant can acquire ownership.
+      fs.unlinkSync(this.leasePath);
+      try{claim();}
+      catch{throw new Error("Another broker acquired the journal lease first");}
+    }
+    this.leaseToken=nonce;
+  }
+  releaseLease(){
+    const token=this.leaseToken;
+    this.leaseToken=null;
+    if(!token)return;
+    try{
+      const claim=JSON.parse(fs.readFileSync(this.leasePath,"utf8"));
+      if(claim.nonce===token && claim.pid===process.pid)fs.unlinkSync(this.leasePath);
+    }catch{ /* only the current owner may remove a lease */ }
   }
   load(){
     fs.mkdirSync(this.dir,{recursive:true,mode:0o700});
@@ -99,13 +146,20 @@ class JobStore {
     const record={id:crypto.randomUUID(),kind:spec.kind,spec,status:"queued",
       created_at:stamp,updated_at:stamp,started_at:null,finished_at:null,
       failure_kind:"",check_count:0};
-    this.jobs.push(record);this.save();return record;
+    this.jobs.push(record);
+    try{this.save()}catch(err){
+      this.jobs=this.jobs.filter(j=>j!==record);
+      throw err;
+    }
+    return record;
   }
   transition(id,changes){
     const item=this.get(id);
     if(!item)throw new Error("Unknown broker job");
+    const previous={...item};
     Object.assign(item,changes,{updated_at:new Date().toISOString()});
-    this.save();return item;
+    try{this.save()}catch(err){Object.assign(item,previous);throw err}
+    return item;
   }
 }
 

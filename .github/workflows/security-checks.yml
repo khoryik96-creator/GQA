@@ -1,0 +1,61 @@
+name: GQA Dependency and Static Security Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - run: go mod tidy
+      - name: Go static diagnostics
+        run: go vet ./...
+      - name: Go vulnerability analysis (reachable dependencies)
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  web-production-deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --package-lock-only --no-audit --no-fund
+      - name: Report high/critical production dependency advisories
+        run: npm audit --omit=dev --audit-level=high
+
+  browser-production-deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: apps/runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --package-lock-only --no-audit --no-fund
+      - run: npm audit --omit=dev --audit-level=high

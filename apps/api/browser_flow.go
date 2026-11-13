@@ -8,7 +8,6 @@ import (
   "encoding/json"
   "errors"
   "fmt"
-  "io"
   "net/http"
   "os"
   "path/filepath"
@@ -100,12 +99,13 @@ func (s *server) browserFlows(w http.ResponseWriter,r *http.Request){
     Objective:draft.Objective,Steps:draft.Steps,Digest:browserFlowDigest(draft.Steps),
     GenerationMode:draft.GenerationMode,Warning:draft.Warning,
   }
+  creator,_:=currentAccount(r)
   err=s.db.QueryRow(r.Context(),`
-    INSERT INTO browser_flows(project_id,plan_id,prompt,objective,steps,digest,generation_mode,warning)
-    VALUES ($1::uuid,$2::uuid,$3,$4,$5::jsonb,$6,$7,$8)
+    INSERT INTO browser_flows(project_id,plan_id,prompt,objective,steps,digest,generation_mode,warning,created_by)
+    VALUES ($1::uuid,$2::uuid,$3,$4,$5::jsonb,$6,$7,$8,$9::uuid)
     RETURNING id::text,created_at`,
     projectID,flow.PlanID,flow.Prompt,flow.Objective,string(stepsJSON),flow.Digest,
-    flow.GenerationMode,flow.Warning).Scan(&flow.ID,&flow.CreatedAt)
+    flow.GenerationMode,flow.Warning,creator.ID).Scan(&flow.ID,&flow.CreatedAt)
   if err!=nil{fail(w,500,"Unable to save browser flow");return}
   writeJSON(w,201,flow)
 }
@@ -193,17 +193,18 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
 
   run:=TestRun{ProjectID:projectID,PlanID:flow.PlanID,TargetURL:input.TargetURL,
     FlowID:flowID,ExecutionKind:"browser_flow",Status:"running"}
+  executor,_:=currentAccount(r)
   err=s.db.QueryRow(r.Context(),`
-    INSERT INTO test_runs(project_id,plan_id,target_url,status,flow_id,execution_kind)
-    VALUES ($1::uuid,$2::uuid,$3,'running',$4::uuid,'browser_flow')
+    INSERT INTO test_runs(project_id,plan_id,target_url,status,flow_id,execution_kind,initiated_by)
+    VALUES ($1::uuid,$2::uuid,$3,'running',$4::uuid,'browser_flow',$5::uuid)
     RETURNING id::text,started_at`,
-    projectID,flow.PlanID,input.TargetURL,flowID).Scan(&run.ID,&run.StartedAt)
+    projectID,flow.PlanID,input.TargetURL,flowID,executor.ID).Scan(&run.ID,&run.StartedAt)
   if err!=nil{fail(w,500,"Unable to initialize browser run");return}
 
   body,_:=json.Marshal(map[string]any{"target_url":input.TargetURL,"steps":flow.Steps})
   endpoint:=os.Getenv("GQA_RUNNER_FLOW_URL")
   if endpoint==""{endpoint="http://runner:8090/flow"}
-  ctx,cancel:=context.WithTimeout(r.Context(),60*time.Second)
+  ctx,cancel:=context.WithTimeout(context.Background(),80*time.Second)
   defer cancel()
   reply:=workerReply{Checks:[]SmokeCheck{}}
   req,err:=http.NewRequestWithContext(ctx,http.MethodPost,endpoint,bytes.NewReader(body))
@@ -211,23 +212,24 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
     req.Header.Set("Content-Type","application/json")
     req.Header.Set("X-GQA-Runner-Token",os.Getenv("GQA_RUNNER_TOKEN"))
     var resp *http.Response
-    resp,err=(&http.Client{Timeout:60*time.Second}).Do(req)
+    resp,err=(&http.Client{Timeout:75*time.Second,CheckRedirect:func(*http.Request,[]*http.Request)error{return http.ErrUseLastResponse}}).Do(req)
     if err==nil{
       defer resp.Body.Close()
       if resp.StatusCode==200{
-        err=json.NewDecoder(io.LimitReader(resp.Body,2<<20)).Decode(&reply)
+        reply,err=decodeWorkerReply(resp.Body)
       }else{
         err=fmt.Errorf("browser runner HTTP %d",resp.StatusCode)
       }
     }
   }
-  if err!=nil{
-    reply=workerReply{Checks:[]SmokeCheck{{
-      Name:"Browser runner availability",Status:"failed",
-      Detail:"Runner was unavailable or returned unusable evidence",
-    }}}
-  }
-  if err:=persistFlowEvidence(r.Context(),s,&run,reply);err!=nil{
+  if err!=nil {
+     reply=recordedRunnerFailure("Browser runner availability")
+   }else if !validatedFlowChecks(reply.Checks,flow.Steps){
+     reply=invalidEvidence()
+   }
+   finalCtx,finishCancel:=context.WithTimeout(context.Background(),10*time.Second)
+   defer finishCancel()
+   if err:=persistFlowEvidence(finalCtx,s,&run,reply);err!=nil{
     fail(w,500,"Browser run finished but results could not be saved");return
   }
   writeJSON(w,201,run)

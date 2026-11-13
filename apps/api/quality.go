@@ -22,6 +22,7 @@ type QualityRun struct {
  Target string
  Status string
  Checks []SmokeCheck
+ Evidence RunEvidence
  StartedAt time.Time
 }
 
@@ -55,6 +56,7 @@ type QualityDay struct {
  Date string `json:"date"`
  Passed int `json:"passed"`
  Failed int `json:"failed"`
+ Infrastructure int `json:"infrastructure"`
 }
 
 type QualityReport struct {
@@ -67,6 +69,7 @@ type QualityReport struct {
  Regressions int `json:"regressions"`
  Recoveries int `json:"recoveries"`
  PersistentFailures int `json:"persistent_failures"`
+ InfrastructureFailures int `json:"infrastructure_failures"`
  UnstablePatterns int `json:"unstable_patterns"`
  Cases []QualityCase `json:"cases"`
  Daily []QualityDay `json:"daily"`
@@ -106,6 +109,26 @@ func failedNames(checks []SmokeCheck) []string{
  return result
 }
 
+func qualityOutcome(run QualityRun)string{
+ if run.Status!="failed"{return run.Status}
+ switch run.Evidence.FailureKind {
+ case "worker_timeout","worker_crash","worker_error","worker_spawn_failure",
+  "worker_ipc_failure","invalid_worker_result","invalid_worker_timeout",
+  "runner_unavailable","runner_interrupted","worker_cancelled",
+  "worker_cleanup_failed","broker_restart","browser_initialization_failed":
+  return "infrastructure_error"
+ }
+ for _,c:=range run.Checks {
+  switch c.Name {
+  case "Runner availability","Browser runner availability","Runner evidence",
+   "Runner evidence validation","One-shot worker lifecycle",
+   "Ephemeral job lifecycle","Browser runner initialization":
+   return "infrastructure_error"
+  }
+ }
+ return "failed"
+}
+
 func newlyAbsent(current,previous []string)[]string{
  used:=make(map[string]bool,len(previous))
  for _,name:=range previous{used[name]=true}
@@ -135,7 +158,11 @@ func summarizeQuality(records []QualityRun,limit int) QualityReport{
   grouped[key]=append(grouped[key],run)
   day:=run.StartedAt.UTC().Format("2006-01-02")
   if days[day]==nil{days[day]=&QualityDay{Date:day}}
-  if run.Status=="passed"{days[day].Passed++}else{days[day].Failed++}
+  switch qualityOutcome(run){
+  case "passed":days[day].Passed++
+  case "failed":days[day].Failed++
+  default:days[day].Infrastructure++
+  }
  }
  for key,runs:=range grouped{
   latest:=runs[len(runs)-1]
@@ -143,26 +170,36 @@ func summarizeQuality(records []QualityRun,limit int) QualityReport{
   hashed:=sha256.Sum256([]byte(key))
   c:=QualityCase{ID:hex.EncodeToString(hashed[:8]),Label:label,
    Kind:latest.Kind,TargetURL:latest.Target,LatestRunID:latest.ID,
-   Status:latest.Status,LastRunAt:latest.StartedAt,Observations:len(runs),
+   Status:qualityOutcome(latest),LastRunAt:latest.StartedAt,Observations:len(runs),
    FailingChecks:failedNames(latest.Checks),
    NewlyFailingChecks:[]string{},RecoveredChecks:[]string{},History:[]QualityPoint{}}
   recent:=runs
   if len(recent)>6{recent=recent[len(recent)-6:]}
   for _,run:=range recent{
-   c.History=append(c.History,QualityPoint{RunID:run.ID,Status:run.Status,StartedAt:run.StartedAt})
+   c.History=append(c.History,QualityPoint{RunID:run.ID,Status:qualityOutcome(run),StartedAt:run.StartedAt})
+  }
+  comparable:=[]QualityRun{}
+  recentComparable:=[]QualityRun{}
+  for _,candidate:=range runs{
+   if qualityOutcome(candidate)!="infrastructure_error"{comparable=append(comparable,candidate)}
+  }
+  for _,candidate:=range recent{
+   if qualityOutcome(candidate)!="infrastructure_error"{recentComparable=append(recentComparable,candidate)}
   }
   switches:=0
-  for i:=1;i<len(recent);i++{
-   if recent[i].Status!=recent[i-1].Status{switches++}
+  for i:=1;i<len(recentComparable);i++{
+   if recentComparable[i].Status!=recentComparable[i-1].Status{switches++}
   }
   c.OutcomeSwitches=switches
-  c.UnstablePattern=len(recent)>=4&&switches>=2
-
-  if len(runs)<2{
-   if latest.Status=="failed"{c.Transition="new_failure"}else{c.Transition="first_pass"}
+  c.UnstablePattern=len(recentComparable)>=4&&switches>=2
+  if c.Status=="infrastructure_error" {
+   c.Transition="infrastructure_error"
+   c.FailingChecks=[]string{}
+  }else if len(comparable)<2{
+   if c.Status=="failed"{c.Transition="new_failure"}else{c.Transition="first_pass"}
    c.NewlyFailingChecks=append(c.NewlyFailingChecks,c.FailingChecks...)
   }else{
-   prev:=runs[len(runs)-2]
+   prev:=comparable[len(comparable)-2]
    c.PreviousRunID=prev.ID
    c.PreviousStatus=prev.Status
    oldFailed:=failedNames(prev.Checks)
@@ -176,7 +213,9 @@ func summarizeQuality(records []QualityRun,limit int) QualityReport{
    }
   }
   report.Cases=append(report.Cases,c)
-  if c.Status=="passed"{report.Passing++}else{report.Failing++}
+  if c.Status=="passed"{report.Passing++
+  }else if c.Status=="failed"{report.Failing++
+  }else{report.InfrastructureFailures++}
   if c.Transition=="regression"{report.Regressions++}
   if c.Transition=="recovered"{report.Recoveries++}
   if c.Transition=="persistent_failure"{report.PersistentFailures++}
@@ -188,6 +227,7 @@ func summarizeQuality(records []QualityRun,limit int) QualityReport{
   priority:=func(x QualityCase)int{
    if x.Transition=="regression"{return 0}
    if x.Status=="failed"{return 1}
+   if x.Status=="infrastructure_error"{return 2}
    if x.UnstablePattern{return 2}
    if x.Transition=="recovered"{return 3}
    return 4
@@ -209,7 +249,7 @@ func (s *server) quality(w http.ResponseWriter,r *http.Request){
  projectID,ok:=validProjectID(w,r);if !ok{return}
  rows,err:=s.db.Query(r.Context(),`
   SELECT id::text,plan_id::text,COALESCE(flow_id::text,''),
-    execution_kind,target_url,status,checks,started_at
+    execution_kind,target_url,status,checks,evidence,started_at
   FROM test_runs
   WHERE project_id=$1::uuid AND status IN ('passed','failed')
   ORDER BY started_at DESC,id DESC LIMIT $2`,projectID,qualityRunLimit+1)
@@ -218,13 +258,16 @@ func (s *server) quality(w http.ResponseWriter,r *http.Request){
  input:=[]QualityRun{}
  for rows.Next(){
   var run QualityRun
-  var checksJSON []byte
+  var checksJSON,evidenceJSON []byte
   if err:=rows.Scan(&run.ID,&run.PlanID,&run.FlowID,&run.Kind,
-     &run.Target,&run.Status,&checksJSON,&run.StartedAt);err!=nil{
+     &run.Target,&run.Status,&checksJSON,&evidenceJSON,&run.StartedAt);err!=nil{
     fail(w,500,"Unable to read quality history");return
   }
   if err:=json.Unmarshal(checksJSON,&run.Checks);err!=nil{
     fail(w,500,"Invalid saved run checks");return
+  }
+  if json.Unmarshal(evidenceJSON,&run.Evidence)!=nil{
+   fail(w,500,"Invalid saved run evidence");return
   }
   if len(run.Checks)>100{fail(w,500,"Excessive saved check count");return}
   input=append(input,run)

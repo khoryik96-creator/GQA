@@ -88,6 +88,36 @@ func clientIP(r *http.Request)string{
  if err!=nil{return r.RemoteAddr}
  return host
 }
+const maxIPLoginAttempts=100
+// Reserve login capacity atomically before bcrypt; account limits and
+// shared-network IP limits are intentionally separate.
+func (a *authenticator) reserveLoginAttempt(ip,email string)bool{
+ digest:=sha256.Sum256([]byte(email))
+ accountKey:="account:"+hex.EncodeToString(digest[:])
+ ipKey:="ip:"+ip
+ a.mu.Lock();defer a.mu.Unlock()
+ now:=time.Now()
+ prune:=func(key string){
+  fresh:=[]time.Time{}
+  for _,when:=range a.failures[key]{
+   if now.Sub(when)<failedLoginWindow{fresh=append(fresh,when)}
+  }
+  if len(fresh)==0{delete(a.failures,key)}else{a.failures[key]=fresh}
+ }
+ prune(accountKey);prune(ipKey)
+ if len(a.failures[accountKey])>=maxLoginFailures||
+  len(a.failures[ipKey])>=maxIPLoginAttempts{return false}
+ a.failures[accountKey]=append(a.failures[accountKey],now)
+ a.failures[ipKey]=append(a.failures[ipKey],now)
+ return true
+}
+func (a *authenticator) clearAccountFailures(email string){
+ digest:=sha256.Sum256([]byte(email))
+ a.mu.Lock()
+ delete(a.failures,"account:"+hex.EncodeToString(digest[:]))
+ a.mu.Unlock()
+}
+
 func (a *authenticator) mayAttemptLogin(ip string)bool{
  a.mu.Lock();defer a.mu.Unlock()
  now:=time.Now()
@@ -138,11 +168,7 @@ func (a *authenticator) cookie(w http.ResponseWriter,value string,maxAge int){
 }
 func (a *authenticator) login(w http.ResponseWriter,r *http.Request){
  ip:=clientIP(r)
- if !a.mayAttemptLogin(ip){
-  w.Header().Set("Retry-After","900")
-  fail(w,http.StatusTooManyRequests,"Too many login attempts. Try again later.")
-  return
- }
+
  var input struct{
   Email string `json:"email"`
   Password string `json:"password"`
@@ -153,6 +179,11 @@ func (a *authenticator) login(w http.ResponseWriter,r *http.Request){
  input.Email=normalizeEmail(input.Email)
  if input.Email==""{input.Email=bootstrapEmail}
  if len(input.Password)>256{fail(w,400,"Invalid login request");return}
+ if !a.reserveLoginAttempt(ip,input.Email){
+  w.Header().Set("Retry-After","900")
+  fail(w,http.StatusTooManyRequests,"Too many login attempts. Try again later.")
+  return
+ }
  var account Account
  var passwordHash string
  err:=a.db.QueryRow(r.Context(),`
@@ -163,7 +194,6 @@ func (a *authenticator) login(w http.ResponseWriter,r *http.Request){
  if err==nil{hash=[]byte(passwordHash)}
  validPassword:=bcrypt.CompareHashAndPassword(hash,[]byte(input.Password))==nil
  if err!=nil||!validPassword{
-  a.recordLoginFailure(ip)
   fail(w,401,"Invalid account credentials")
   return
  }
@@ -175,7 +205,7 @@ func (a *authenticator) login(w http.ResponseWriter,r *http.Request){
   INSERT INTO auth_sessions(token_digest,user_id,expires_at)
   VALUES($1::bytea,$2::uuid,$3)`,hashed[:],account.ID,expires)
  if err!=nil{fail(w,500,"Unable to save session");return}
- a.clearFailures(ip)
+ a.clearAccountFailures(input.Email)
  a.cookie(w,hex.EncodeToString(raw),int(sessionLifetime.Seconds()))
  writeJSON(w,200,map[string]any{"authenticated":true,"expires_at":expires,"user":account})
 }

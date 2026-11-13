@@ -26,7 +26,7 @@ func cleanRunEvidence(raw RunEvidence, status string) RunEvidence {
     "browser_initialization_failed","browser_smoke_failure","api_health_failure",
     "worker_timeout","worker_crash","worker_error","worker_spawn_failure",
     "worker_ipc_failure","invalid_worker_result","invalid_worker_timeout",
-    "runner_unavailable","worker_cancelled","worker_cleanup_failed","broker_restart",
+    "runner_unavailable","runner_interrupted","worker_cancelled","worker_cleanup_failed","broker_restart",
   }
   if !isOneOf(raw.FailureKind,allowedFailure...){raw.FailureKind="unknown"}
   if !uuidRE.MatchString(raw.JobID){raw.JobID=""}

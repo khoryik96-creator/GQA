@@ -66,3 +66,18 @@ func TestCookieAttributes(t *testing.T){
   if !strings.Contains(header,required){t.Fatalf("cookie missing %q: %s",required,header)}
  }
 }
+
+func TestConcurrentAccountRateLimitIsAtomic(t *testing.T){
+ auth,_:=newAuthenticator(nil,"at-least-sixteen-character-password","http://localhost:3000",false)
+ const attempts=40
+ results:=make(chan bool,attempts)
+ for i:=0;i<attempts;i++{go func(){results<-auth.reserveLoginAttempt("127.0.0.1","admin@gqa.local")}()}
+ allowed:=0
+ for i:=0;i<attempts;i++{if <-results{allowed++}}
+ if allowed!=maxLoginFailures{t.Fatalf("allowed %d concurrent attempts",allowed)}
+ if !auth.reserveLoginAttempt("127.0.0.1","second@example.test"){
+  t.Fatal("another account behind the same IP is incorrectly locked")}
+ auth.clearAccountFailures("admin@gqa.local")
+ if !auth.reserveLoginAttempt("127.0.0.1","admin@gqa.local"){
+  t.Fatal("successful login should reset account throttle")}
+}

@@ -10,6 +10,8 @@ import (
   "net/http"
   "net/url"
   "os"
+  "os/signal"
+  "syscall"
   "regexp"
   "strings"
   "time"
@@ -74,7 +76,9 @@ func main() {
   if err != nil { log.Fatal(err) }
   defer db.Close()
   if err = db.Ping(ctx); err != nil { log.Fatal("database: ", err) }
-  if _, err = db.Exec(ctx, schema, pgx.QueryExecModeSimpleProtocol); err != nil { log.Fatal("migrate schema: ", err) }
+  if os.Getenv("GQA_SCHEMA_MANAGED")!="true" {
+    if _, err = db.Exec(ctx, schema, pgx.QueryExecModeSimpleProtocol); err != nil { log.Fatal("migrate schema: ", err) }
+  }
   s := &server{db: db}
   origin := os.Getenv("ALLOWED_ORIGIN")
   if origin == "" { origin = "http://localhost:3000" }
@@ -82,6 +86,11 @@ func main() {
     os.Getenv("GQA_COOKIE_SECURE")=="true")
   if err!=nil{log.Fatal("authentication setup: ",err)}
   if err:=auth.bootstrap(ctx);err!=nil{log.Fatal("admin account bootstrap: ",err)}
+  if err:=reconcileOrphanedRuns(ctx,db);err!=nil{log.Fatal("reconcile orphaned runs: ",err)}
+  if err:=pruneExpiredMetadata(ctx,db);err!=nil{log.Printf("metadata housekeeping: %v",err)}
+  maintenanceCtx,stopMaintenance:=context.WithCancel(context.Background())
+  defer stopMaintenance()
+  go maintainLocalMetadata(maintenanceCtx,db)
   if len(os.Getenv("GQA_RUNNER_TOKEN"))<24 {
     log.Fatal("GQA_RUNNER_TOKEN must be a 24+ character secret in local .env")
   }
@@ -99,18 +108,18 @@ func main() {
   mux.HandleFunc("GET /api/projects/{id}/memories", auth.project("read",s.memories))
   mux.HandleFunc("POST /api/projects/{id}/memories", auth.project("qa",s.memories))
   mux.HandleFunc("GET /api/projects/{id}/plans", auth.project("read",s.plans))
-  mux.HandleFunc("POST /api/projects/{id}/plans", auth.project("qa",s.plans))
+  mux.HandleFunc("POST /api/projects/{id}/plans", auth.project("qa",budgetedAction("plans",60,s.plans)))
   mux.HandleFunc("GET /api/projects/{id}/inspection", auth.project("read",s.inspection))
-  mux.HandleFunc("POST /api/projects/{id}/inspection", auth.project("qa",s.inspection))
+  mux.HandleFunc("POST /api/projects/{id}/inspection", auth.project("qa",budgetedAction("repository_inspection",30,s.inspection)))
   mux.HandleFunc("GET /api/projects/{id}/flows", auth.project("read",s.browserFlows))
-  mux.HandleFunc("POST /api/projects/{id}/flows", auth.project("qa",s.browserFlows))
-  mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/execute", auth.project("qa",s.executeBrowserFlow))
+  mux.HandleFunc("POST /api/projects/{id}/flows", auth.project("qa",budgetedAction("flow_drafting",60,s.browserFlows)))
+  mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/execute", auth.project("qa",budgetedAction("execution",60,s.executeBrowserFlow)))
   mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/propose-repair", auth.project("qa",s.proposeRepair))
   mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/confirm-repair", auth.project("review",s.confirmRepair))
   mux.HandleFunc("GET /api/projects/{id}/repairs", auth.project("read",s.reviewedRepairs))
   mux.HandleFunc("GET /api/projects/{id}/runs", auth.project("read",s.runs))
   mux.HandleFunc("GET /api/projects/{id}/quality", auth.project("read",s.quality))
-  mux.HandleFunc("POST /api/projects/{id}/runs", auth.project("qa",s.runs))
+  mux.HandleFunc("POST /api/projects/{id}/runs", auth.project("qa",budgetedAction("execution",60,s.runs)))
   mux.HandleFunc("GET /api/runs/{id}/screenshot", auth.screenshot(s.screenshot))
   mux.HandleFunc("GET /api/admin/users",auth.admin(s.users))
   mux.HandleFunc("POST /api/admin/users",auth.admin(s.users))
@@ -119,6 +128,7 @@ func main() {
   mux.HandleFunc("GET /api/admin/security-audit",auth.admin(s.accountSecurityAudit))
   mux.HandleFunc("GET /api/admin/broker-jobs",auth.admin(s.brokerJobs))
   mux.HandleFunc("GET /api/admin/broker-jobs/{id}",auth.admin(s.brokerJobs))
+  mux.HandleFunc("GET /api/admin/broker-jobs/{id}/result",auth.admin(s.brokerJobs))
   mux.HandleFunc("POST /api/admin/broker-jobs/{id}/cancel",auth.admin(s.brokerJobs))
   mux.HandleFunc("GET /api/projects/{id}/members",auth.project("manage",s.projectMembers))
   mux.HandleFunc("POST /api/projects/{id}/members",auth.project("manage",s.projectMembers))
@@ -130,9 +140,20 @@ func main() {
   log.Printf("GQA API listening on :%s", port)
   httpServer:=&http.Server{
     Addr:":"+port,Handler:cors(auth.enforce(mux),origin),
-    ReadHeaderTimeout:5*time.Second,IdleTimeout:60*time.Second,
+    ReadHeaderTimeout:5*time.Second,ReadTimeout:20*time.Second,
+    WriteTimeout:100*time.Second,IdleTimeout:60*time.Second,MaxHeaderBytes:16<<10,
   }
-  log.Fatal(httpServer.ListenAndServe())
+  stopCtx,stopSignal:=signal.NotifyContext(context.Background(),syscall.SIGINT,syscall.SIGTERM)
+  defer stopSignal()
+  go func(){
+    <-stopCtx.Done()
+    shutdownCtx,cancel:=context.WithTimeout(context.Background(),90*time.Second)
+    defer cancel()
+    _=httpServer.Shutdown(shutdownCtx)
+  }()
+  if err:=httpServer.ListenAndServe();err!=nil && err!=http.ErrServerClosed{
+    log.Fatal("API server: ",err)
+  }
 }
 
 func cors(next http.Handler, origin string) http.Handler {
@@ -310,9 +331,10 @@ func (s *server) memories(w http.ResponseWriter, r *http.Request) {
     if err != nil { fail(w,500,"Could not supersede memory"); return }
   }
   var m Memory
+  author,_:=currentAccount(r)
   err = tx.QueryRow(r.Context(),
-    "INSERT INTO memories (project_id,kind,content,source,status,supersedes_id) VALUES ($1::uuid,$2,$3,'user','confirmed',NULLIF($4,'')::uuid) RETURNING id::text,project_id::text,kind,content,source,status,COALESCE(supersedes_id::text,''),created_at",
-    id,input.Kind,input.Content,input.SupersedesID,
+    "INSERT INTO memories (project_id,kind,content,source,status,supersedes_id,created_by) VALUES ($1::uuid,$2,$3,'user','confirmed',NULLIF($4,'')::uuid,$5::uuid) RETURNING id::text,project_id::text,kind,content,source,status,COALESCE(supersedes_id::text,''),created_at",
+    id,input.Kind,input.Content,input.SupersedesID,author.ID,
   ).Scan(&m.ID,&m.ProjectID,&m.Kind,&m.Content,&m.Source,&m.Status,&m.SupersedesID,&m.CreatedAt)
   if err != nil { fail(w,500,"Unable to save memory (check project ID)"); return }
   if err = tx.Commit(r.Context()); err != nil { fail(w,500,"Unable to commit memory"); return }

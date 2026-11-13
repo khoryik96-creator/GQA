@@ -75,3 +75,15 @@ func TestQualityNoData(t *testing.T){
   t.Fatalf("empty quality view invalid %+v",got)
  }
 }
+
+func TestInfrastructureFailureNeverClaimsProductRegression(t *testing.T){
+ prior:=qualityRun("prior","smoke","http://fixture:8081","passed",1,ck("API GET /healthz","passed"))
+ infra:=qualityRun("infra","smoke","http://fixture:8081","failed",2,ck("Runner availability","failed"))
+ infra.Evidence.FailureKind="runner_unavailable"
+ report:=summarizeQuality([]QualityRun{infra,prior},200)
+ if report.Regressions!=0||report.Failing!=0||report.InfrastructureFailures!=1||
+  report.Cases[0].Transition!="infrastructure_error"{t.Fatalf("worker interruption considered a regression: %+v",report)}
+ regression:=qualityRun("regression","smoke","http://fixture:8081","failed",3,ck("API GET /healthz","failed"))
+ restored:=summarizeQuality([]QualityRun{regression,infra,prior},200)
+ if restored.Regressions!=1{t.Fatalf("worker interruption erased baseline: %+v",restored)}
+}

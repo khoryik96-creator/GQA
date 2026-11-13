@@ -111,3 +111,12 @@ test("Docker cleanup failure is never reported as successful",async()=>{
  assert.equal(result.checks[0].status,"failed");
  assert.equal(result.evidence.failure_kind,"worker_cleanup_failed");
 });
+
+test("invalid worker output and cleanup failure is fail-closed",async()=>{
+ const result=await executeJob(smoke,{run:async(_,args)=>{
+  if(args[0]==="rm")throw Object.assign(new Error("Docker unavailable"),{stderr:"Cannot connect to Docker daemon"});
+  return {stdout:"broken\\nworker-output"};
+ }});
+ assert.equal(result.evidence.failure_kind,"worker_cleanup_failed");
+ assert.equal(result.checks[0].status,"failed");
+});

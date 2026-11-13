@@ -185,3 +185,21 @@ CREATE TABLE IF NOT EXISTS account_security_audit (
 );
 CREATE INDEX IF NOT EXISTS account_security_audit_recent
  ON account_security_audit(created_at DESC);
+
+-- Audit actor fields preserve old records without fabricating identities.
+ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS initiated_by UUID REFERENCES gqa_users(id);
+ALTER TABLE browser_flows ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES gqa_users(id);
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES gqa_users(id);
+ALTER TABLE repair_acceptances ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES gqa_users(id);
+CREATE INDEX IF NOT EXISTS test_runs_quality_recent ON test_runs(project_id,started_at DESC,id DESC)
+ WHERE status IN ('passed','failed');
+
+-- A manually typed build revision must never be reported as attested.
+ALTER TABLE repair_acceptances ADD COLUMN IF NOT EXISTS revision_provenance TEXT NOT NULL
+ DEFAULT 'user_declared' CHECK (revision_provenance IN ('user_declared','build_attested'));
+
+-- Support crash recovery as a distinct execution state instead of reporting
+-- an infrastructure interruption as an application assertion failure.
+ALTER TABLE test_runs DROP CONSTRAINT IF EXISTS test_runs_status_check;
+ALTER TABLE test_runs ADD CONSTRAINT test_runs_status_check
+ CHECK (status IN ('queued','running','passed','failed','cancelled','timed_out','interrupted','incomplete'));

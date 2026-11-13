@@ -160,3 +160,54 @@ test("only exact, bounded fixture job specs enter the journal",t=>{
  const saved=store.create(spec);
  assert.equal(saved.status,"queued");
 });
+
+test("journal lease rejects a simultaneous broker and permits clean release",t=>{
+ const dir=temp(t);
+ const first=new JobStore(dir),second=new JobStore(dir);
+ first.acquireLease();
+ assert.throws(()=>second.acquireLease(),/Another broker still holds/);
+ first.releaseLease();
+ second.acquireLease();
+ second.releaseLease();
+});
+test("stale journal lease can only be reclaimed after owning process dies",t=>{
+ const dir=temp(t);
+ const fs=require("node:fs");
+ fs.writeFileSync(path.join(dir,"broker.lease"),
+   JSON.stringify({pid:2147483647,nonce:"a".repeat(32)}));
+ const store=new JobStore(dir);
+ store.acquireLease();
+ assert.equal(store.leaseToken.length,32);
+ store.releaseLease();
+});
+
+test("asynchronous jobs keep sanitized result evidence after completion",async t=>{
+ const dir=temp(t);
+ const scheduler=new Scheduler({store:new JobStore(dir),cleanup:async()=>{},
+  runJob:async()=>({...success,secret:"not stored"})});
+ await scheduler.start();
+ const job=scheduler.enqueue(spec);
+ await tick();await tick();await tick();
+ assert.equal(scheduler.get(job.id).status,"passed");
+ assert.equal(scheduler.get(job.id).result_available,true);
+ const result=scheduler.getResult(job.id);
+ assert.equal(result.checks[0].status,"passed");
+ assert.equal(JSON.stringify(result).includes("not stored"),false);
+ const restored=new Scheduler({store:new JobStore(dir),cleanup:async()=>{}});
+ await restored.start();
+ assert.equal(restored.getResult(job.id).checks[0].status,"passed");
+});
+
+test("journal disk failure cannot leave phantom in-memory jobs",t=>{
+ const dir=temp(t),store=new JobStore(dir);
+ store.load();
+ const persist=store.save.bind(store);
+ store.save=()=>{throw Error("disk unavailable")};
+ assert.throws(()=>store.create(spec),/disk unavailable/);
+ assert.equal(store.jobs.length,0);
+ store.save=persist;
+ const job=store.create(spec);
+ store.save=()=>{throw Error("disk unavailable")};
+ assert.throws(()=>store.transition(job.id,{status:"passed"}),/disk unavailable/);
+ assert.equal(store.get(job.id).status,"queued");
+});

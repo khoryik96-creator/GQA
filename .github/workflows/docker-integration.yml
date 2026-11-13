@@ -16,8 +16,20 @@ jobs:
         run: |
           printf 'GQA_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" > .env
           printf 'GQA_RUNNER_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+          printf 'GQA_DB_APP_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> .env
       - name: Build and start local stack
         run: docker compose up --build -d
+
+      - name: Verify runtime database least-privilege role
+        run: |
+          # The live API principal must not own the database or have
+          # permission to create roles/databases.
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT rolsuper FROM pg_roles WHERE rolname='gqa_app'")" = "f"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT rolcreatedb FROM pg_roles WHERE rolname='gqa_app'")" = "f"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT rolcreaterole FROM pg_roles WHERE rolname='gqa_app'")" = "f"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT has_table_privilege('gqa_app','public.projects','SELECT')")" = "t"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT has_schema_privilege('gqa_app','public','CREATE')")" = "f"
+          echo "PASS: isolated application database role cannot perform DDL or create roles"
 
       - name: Verify isolated worker settings and deny external egress
         run: |
