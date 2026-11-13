@@ -7,11 +7,16 @@ import {
   History, Layers3, Loader2, Plus, Search, Send, ShieldCheck,
   Smartphone, Sparkles, Target, Workflow, X, LogOut, LockKeyhole, type LucideIcon
 } from "lucide-react";
-import ScenarioReview, { type TestSpecification } from "../components/ScenarioReview";
-import BrowserFlowStudio from "../components/BrowserFlowStudio";
-import TeamAccess from "../components/TeamAccess";
-import AccountSecurity from "../components/AccountSecurity";
-import RegressionIntelligence from "../components/RegressionIntelligence";
+import dynamic from "next/dynamic";
+import type { TestSpecification } from "../components/ScenarioReview";
+
+// Panels are loaded only when their tab or workflow is opened. Avoid sending
+// full QA history, administration and flow-editing UIs in the login bundle.
+const ScenarioReview = dynamic(() => import("../components/ScenarioReview"));
+const BrowserFlowStudio = dynamic(() => import("../components/BrowserFlowStudio"));
+const TeamAccess = dynamic(() => import("../components/TeamAccess"));
+const AccountSecurity = dynamic(() => import("../components/AccountSecurity"));
+const RegressionIntelligence = dynamic(() => import("../components/RegressionIntelligence"));
 
 type AppType = "fullstack" | "web" | "api" | "backend" | "mobile";
 type Environment = "local" | "staging" | "production";
