@@ -100,12 +100,13 @@ func (s *server) browserFlows(w http.ResponseWriter,r *http.Request){
     Objective:draft.Objective,Steps:draft.Steps,Digest:browserFlowDigest(draft.Steps),
     GenerationMode:draft.GenerationMode,Warning:draft.Warning,
   }
+  creator,_:=currentAccount(r)
   err=s.db.QueryRow(r.Context(),`
-    INSERT INTO browser_flows(project_id,plan_id,prompt,objective,steps,digest,generation_mode,warning)
-    VALUES ($1::uuid,$2::uuid,$3,$4,$5::jsonb,$6,$7,$8)
+    INSERT INTO browser_flows(project_id,plan_id,prompt,objective,steps,digest,generation_mode,warning,created_by)
+    VALUES ($1::uuid,$2::uuid,$3,$4,$5::jsonb,$6,$7,$8,$9::uuid)
     RETURNING id::text,created_at`,
     projectID,flow.PlanID,flow.Prompt,flow.Objective,string(stepsJSON),flow.Digest,
-    flow.GenerationMode,flow.Warning).Scan(&flow.ID,&flow.CreatedAt)
+    flow.GenerationMode,flow.Warning,creator.ID).Scan(&flow.ID,&flow.CreatedAt)
   if err!=nil{fail(w,500,"Unable to save browser flow");return}
   writeJSON(w,201,flow)
 }
@@ -193,11 +194,12 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
 
   run:=TestRun{ProjectID:projectID,PlanID:flow.PlanID,TargetURL:input.TargetURL,
     FlowID:flowID,ExecutionKind:"browser_flow",Status:"running"}
+  executor,_:=currentAccount(r)
   err=s.db.QueryRow(r.Context(),`
-    INSERT INTO test_runs(project_id,plan_id,target_url,status,flow_id,execution_kind)
-    VALUES ($1::uuid,$2::uuid,$3,'running',$4::uuid,'browser_flow')
+    INSERT INTO test_runs(project_id,plan_id,target_url,status,flow_id,execution_kind,initiated_by)
+    VALUES ($1::uuid,$2::uuid,$3,'running',$4::uuid,'browser_flow',$5::uuid)
     RETURNING id::text,started_at`,
-    projectID,flow.PlanID,input.TargetURL,flowID).Scan(&run.ID,&run.StartedAt)
+    projectID,flow.PlanID,input.TargetURL,flowID,executor.ID).Scan(&run.ID,&run.StartedAt)
   if err!=nil{fail(w,500,"Unable to initialize browser run");return}
 
   body,_:=json.Marshal(map[string]any{"target_url":input.TargetURL,"steps":flow.Steps})

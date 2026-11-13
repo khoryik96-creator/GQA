@@ -315,9 +315,10 @@ func (s *server) memories(w http.ResponseWriter, r *http.Request) {
     if err != nil { fail(w,500,"Could not supersede memory"); return }
   }
   var m Memory
+  author,_:=currentAccount(r)
   err = tx.QueryRow(r.Context(),
-    "INSERT INTO memories (project_id,kind,content,source,status,supersedes_id) VALUES ($1::uuid,$2,$3,'user','confirmed',NULLIF($4,'')::uuid) RETURNING id::text,project_id::text,kind,content,source,status,COALESCE(supersedes_id::text,''),created_at",
-    id,input.Kind,input.Content,input.SupersedesID,
+    "INSERT INTO memories (project_id,kind,content,source,status,supersedes_id,created_by) VALUES ($1::uuid,$2,$3,'user','confirmed',NULLIF($4,'')::uuid,$5::uuid) RETURNING id::text,project_id::text,kind,content,source,status,COALESCE(supersedes_id::text,''),created_at",
+    id,input.Kind,input.Content,input.SupersedesID,author.ID,
   ).Scan(&m.ID,&m.ProjectID,&m.Kind,&m.Content,&m.Source,&m.Status,&m.SupersedesID,&m.CreatedAt)
   if err != nil { fail(w,500,"Unable to save memory (check project ID)"); return }
   if err = tx.Commit(r.Context()); err != nil { fail(w,500,"Unable to commit memory"); return }

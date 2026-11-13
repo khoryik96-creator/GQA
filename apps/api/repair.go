@@ -116,14 +116,15 @@ func (s *server) proposeRepair(w http.ResponseWriter,r *http.Request){
   Warning:warning,RepairSourceFlowID:flowID,RepairSourceRunID:input.FailedRunID,
   RepairTarget:targetURL,
  }
+ creator,_:=currentAccount(r)
  err=s.db.QueryRow(r.Context(),`
   INSERT INTO browser_flows (
    project_id,plan_id,prompt,objective,steps,digest,generation_mode,warning,
-   repaired_from_flow_id,repaired_from_run_id,repair_target)
-  VALUES($1::uuid,$2::uuid,$3,$4,$5::jsonb,$6,'rules',$7,$8::uuid,$9::uuid,$10)
+   repaired_from_flow_id,repaired_from_run_id,repair_target,created_by)
+  VALUES($1::uuid,$2::uuid,$3,$4,$5::jsonb,$6,'rules',$7,$8::uuid,$9::uuid,$10,$11::uuid)
   RETURNING id::text,created_at`,
   projectID,planID,prompt,objective,string(stepsRaw),newDigest,warning,
-  flowID,input.FailedRunID,targetURL).
+  flowID,input.FailedRunID,targetURL,creator.ID).
   Scan(&revised.ID,&revised.CreatedAt)
  if err!=nil{fail(w,409,"A repair may already exist for this failed run");return}
  writeJSON(w,201,revised)
@@ -194,14 +195,15 @@ func (s *server) confirmRepair(w http.ResponseWriter,r *http.Request){
   TargetURL:targetURL,OldName:hint.OriginalName,NewName:hint.ProposedName,
   AppRevision:input.Revision,MemoryID:memoryID,
  }
+ approver,_:=currentAccount(r)
  err=tx.QueryRow(r.Context(),`
   INSERT INTO repair_acceptances(
    project_id,original_flow_id,repaired_flow_id,original_failure_run_id,verified_run_id,
-   app_revision,target_url,step_index,old_name,new_name,memory_id)
-  VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11::uuid)
+   app_revision,target_url,step_index,old_name,new_name,memory_id,approved_by)
+  VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11::uuid,$12::uuid)
   RETURNING accepted_at`,
   projectID,sourceFlowID,flowID,failedRunID,input.SuccessfulRunID,input.Revision,
-  targetURL,hint.StepIndex,hint.OriginalName,hint.ProposedName,memoryID).
+  targetURL,hint.StepIndex,hint.OriginalName,hint.ProposedName,memoryID,approver.ID).
   Scan(&accepted.AcceptedAt)
  if err!=nil{fail(w,409,"Repair acceptance conflict");return}
  _,err=tx.Exec(r.Context(),`
