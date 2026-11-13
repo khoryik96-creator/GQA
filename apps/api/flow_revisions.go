@@ -5,7 +5,6 @@ import (
  "encoding/json"
  "errors"
  "net/http"
- "strings"
 
  "github.com/jackc/pgx/v5"
 )
