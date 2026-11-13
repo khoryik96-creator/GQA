@@ -75,6 +75,10 @@ async function checkRole(role, projectA, projectB, email) {
   assert.equal(write.status(), allowed ? 201 : 403, role + " unexpected memory write authority");
   const manage = await request(context, "GET", "/api/projects/" + projectA.id + "/members");
   assert.equal(manage.status(), 403, role + " unexpectedly received member management access");
+  const activity = await request(context, "GET",
+    "/api/projects/" + projectA.id + "/qa-activity?limit=10");
+  assert.equal(activity.status(), role === "reviewer" ? 200 : 403,
+    role + " unexpected QA activity access");
   const createProject = await request(context, "POST", "/api/projects", {
     name: "Unauthorized project " + suffix, repo_url: "https://github.com/khoryik96-creator/GQA",
     app_type: "api", stack: "CI"

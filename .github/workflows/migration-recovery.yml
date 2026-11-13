@@ -44,11 +44,15 @@ jobs:
           expected_v3="$(sha256sum db-migrate/versions/0003_immutable_flow_revisions.sql | cut -d ' ' -f1)"
           recorded_v3="$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT checksum FROM public.gqa_schema_migrations WHERE version=3')"
           test "$expected_v3" = "$recorded_v3"
+          expected_v4="$(sha256sum db-migrate/versions/0004_qa_activity_audit.sql | cut -d ' ' -f1)"
+          recorded_v4="$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT checksum FROM public.gqa_schema_migrations WHERE version=4')"
+          test "$expected_v4" = "$recorded_v4"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='qa_activity_project_date'")" = "1"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='browser_flow_one_revision_per_source'")" = "1"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('plans_project_created_id','test_runs_project_started_id','browser_flows_project_created_id','memories_project_created_id')")" = "4"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM projects WHERE name='GQA legacy sentinel'")" = "1"
           docker compose run --rm migrate
-          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "3"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "4"
 
       - name: Rehearse custom-format backup and transactional restore into a separate disposable database
         run: |
@@ -82,7 +86,7 @@ jobs:
           docker compose exec -T db createdb -U gqa --template=template0 gqa_recovered
           docker compose exec -T db pg_restore -U gqa -d gqa_recovered \
             --no-owner --single-transaction --exit-on-error < "$backup"
-          for table in projects qa_requests plans test_runs browser_flows memories gqa_schema_migrations; do
+          for table in projects qa_requests plans test_runs browser_flows memories qa_activity_audit gqa_schema_migrations; do
             source_rows="$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM $table")"
             restore_rows="$(docker compose exec -T db psql -U gqa -d gqa_recovered -Atc "SELECT count(*) FROM $table")"
             test "$source_rows" = "$restore_rows"
@@ -91,6 +95,9 @@ jobs:
           expected_v3_restore="$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT checksum FROM gqa_schema_migrations WHERE version=3")"
           restored_v3="$(docker compose exec -T db psql -U gqa -d gqa_recovered -Atc "SELECT checksum FROM gqa_schema_migrations WHERE version=3")"
           test "$expected_v3_restore" = "$restored_v3"
+          expected_v4_restore="$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT checksum FROM gqa_schema_migrations WHERE version=4")"
+          restored_v4="$(docker compose exec -T db psql -U gqa -d gqa_recovered -Atc "SELECT checksum FROM gqa_schema_migrations WHERE version=4")"
+          test "$expected_v4_restore" = "$restored_v4"
           test "$(docker compose exec -T db psql -U gqa -d gqa_recovered -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='browser_flow_one_revision_per_source'")" = "1"
           expected="$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT checksum FROM gqa_schema_migrations WHERE version=2")"
           restored="$(docker compose exec -T db psql -U gqa -d gqa_recovered -Atc "SELECT checksum FROM gqa_schema_migrations WHERE version=2")"

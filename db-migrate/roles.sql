@@ -12,3 +12,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE gqa IN SCHEMA public
  GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO gqa_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE gqa IN SCHEMA public
  GRANT USAGE,SELECT,UPDATE ON SEQUENCES TO gqa_app;
+
+-- Only database-owned source-table triggers may append QA events. The runtime
+-- principal can read, but cannot forge, modify, or delete audit rows.
+REVOKE INSERT, UPDATE, DELETE ON TABLE public.qa_activity_audit FROM gqa_app;

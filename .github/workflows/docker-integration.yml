@@ -30,6 +30,11 @@ jobs:
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT rolcreaterole FROM pg_roles WHERE rolname='gqa_app'")" = "f"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT has_table_privilege('gqa_app','public.projects','SELECT')")" = "t"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT has_schema_privilege('gqa_app','public','CREATE')")" = "f"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT has_table_privilege('gqa_app','public.qa_activity_audit','SELECT')")" = "t"
+          for privilege in INSERT UPDATE DELETE TRUNCATE; do
+            test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT has_table_privilege('gqa_app','public.qa_activity_audit','$privilege')")" = "f"
+          done
+          echo "PASS: runtime database role cannot forge or modify QA audit events"
           echo "PASS: isolated application database role cannot perform DDL or create roles"
 
       - name: Verify numbered migration ledger and safe re-run
@@ -43,11 +48,15 @@ jobs:
           expected_v3="$(sha256sum db-migrate/versions/0003_immutable_flow_revisions.sql | cut -d ' ' -f1)"
           stored_v3="$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT checksum FROM public.gqa_schema_migrations WHERE version=3')"
           test "$stored_v3" = "$expected_v3"
+          expected_v4="$(sha256sum db-migrate/versions/0004_qa_activity_audit.sql | cut -d ' ' -f1)"
+          stored_v4="$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT checksum FROM public.gqa_schema_migrations WHERE version=4')"
+          test "$stored_v4" = "$expected_v4"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='qa_activity_project_date'")" = "1"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='browser_flow_one_revision_per_source'")" = "1"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('plans_project_created_id','test_runs_project_started_id','browser_flows_project_created_id','memories_project_created_id')")" = "4"
-          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "3"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "4"
           docker compose run --rm migrate
-          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "3"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "4"
           echo "PASS: checksummed baseline is recorded and re-running migrations is idempotent"
 
       - name: Verify isolated worker settings and deny external egress
@@ -383,6 +392,18 @@ jobs:
           assert accepted["memory_id"], accepted
           assert accepted["old_name"] == "Show details", accepted
           assert accepted["new_name"] == "Reveal details", accepted
+          with urllib.request.urlopen(BASE + f"/api/projects/{project_id}/qa-activity?limit=100") as response:
+              audit_page = json.load(response)
+          events = audit_page["items"]
+          assert any(e["action"] == "repair_approved" and e["object_type"] == "repair_acceptance"
+                     and e["actor_email"] == "admin@gqa.local" for e in events), events
+          assert any(e["action"] == "repair_proposed" and e["object_id"] == repair["id"] for e in events)
+          assert any(e["action"] == "run_status_changed" and e["object_id"] == repaired_run["id"]
+                     and e["result_status"] == "passed" for e in events), events
+          assert any(e["action"] == "flow_drafted" and e["object_id"] == flow["id"] for e in events)
+          assert all("password" not in json.dumps(e).lower() and
+                     "fixture details visible" not in json.dumps(e).lower() for e in events)
+
 
           with urllib.request.urlopen(BASE + f"/api/projects/{project_id}/repairs") as response:
               lessons = json.loads(response.read().decode("utf-8"))
@@ -654,6 +675,22 @@ jobs:
 
           print("PASS: memory-aware QA planning, real API/browser checks, screenshot, production block, typed browser flows, reviewable repairs, admin login, CSRF checks and logout")
           PY
+
+      - name: Ensure generated QA audit events cannot be changed or deleted
+        run: |
+          set -euo pipefail
+          existing="$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM qa_activity_audit')"
+          test "$existing" -gt 5
+          if docker compose exec -T db psql -U gqa -d gqa -v ON_ERROR_STOP=1 -c              "UPDATE qa_activity_audit SET result_status='forged' WHERE id=(SELECT id FROM qa_activity_audit LIMIT 1)" >/dev/null 2>&1; then
+            echo "ERROR: an audit record was altered"
+            exit 1
+          fi
+          if docker compose exec -T db psql -U gqa -d gqa -v ON_ERROR_STOP=1 -c              "DELETE FROM qa_activity_audit WHERE id=(SELECT id FROM qa_activity_audit LIMIT 1)" >/dev/null 2>&1; then
+            echo "ERROR: an audit record was deleted"
+            exit 1
+          fi
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM qa_activity_audit')" = "$existing"
+          echo "PASS: audit rows remain append-only after privileged SQL mutation attempts"
 
       - name: Revoke in-flight QA member while the isolated runner is paused
         env:
