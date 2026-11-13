@@ -4,7 +4,7 @@ Previously the API checked a user's authenticated session and project QA members
 
 The API now checks the original session token and current account/project authorization **every two seconds** while the HTTP runner request is in flight, using a 1.5-second bounded database permission query. A rejected, expired or suspended session, revoked QA/owner project membership, or temporary permission-query failure cancels the worker request. It also performs a separate final authorization check before storing any success or screenshot evidence.
 
-The result is written as a failed run, with no success screenshot, and the initiating request receives 403 for revoked authorization, or 503 if final authorization is temporarily unavailable. The caller's HTTP request context now also cancels pending remote work on client disconnect; recording the result uses a separate bounded finalization context.
+The result is written as a failed run, with no success screenshot, and the initiating request receives 403 for revoked authorization, or 503 if final authorization is temporarily unavailable. The Node one-shot runner supervisor also receives the HTTP abort signal and force-terminates its spawned process group; the job no longer continues merely because its client disconnected. The caller's HTTP request context now also cancels pending remote work on client disconnect; recording the result uses a separate bounded finalization context.
 
 ## Disposable integration rehearsal
 
