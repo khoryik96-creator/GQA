@@ -20,15 +20,16 @@ export default function AdminWorkerJobs({apiBase}:{apiBase:string}){
  const [revision,setRevision]=useState(0);
  const [selectedResultId,setSelectedResultId]=useState("");
  const [result,setResult]=useState<JobEvidence|null>(null);
+ const [refreshedAt,setRefreshedAt]=useState<Date|null>(null);
  // Poll only while this administrator panel is mounted and enabled.
  // This is deliberately bounded; errors continue to use the manual retry UI.
  useEffect(()=>{
-  if(enabled!==true)return;
+  if(enabled!==true||!!error)return;
   const handle=setInterval(()=>{
    if(!document.hidden&&!busy)setRevision(v=>v+1);
   },15000);
   return ()=>clearInterval(handle);
- },[enabled,busy]);
+ },[enabled,busy,error]);
  useEffect(()=>{
   let active=true;
   fetch(apiBase+"/api/admin/broker-jobs",{
@@ -38,7 +39,7 @@ export default function AdminWorkerJobs({apiBase}:{apiBase:string}){
     if(response.status===501){setEnabled(false);return}
     if(!response.ok)throw Error("Unable to reach experimental host broker");
     const data=await response.json() as Job[];
-    if(active){setEnabled(true);setJobs(data);setError("");}
+    if(active){setEnabled(true);setJobs(data);setError("");setRefreshedAt(new Date());}
   }).catch(err=>{if(active){setEnabled(true);setError((err as Error).message)}});
   return ()=>{active=false};
  },[apiBase,revision]);
@@ -68,7 +69,8 @@ export default function AdminWorkerJobs({apiBase}:{apiBase:string}){
   }catch(err){setError((err as Error).message)}
   finally{setBusy(false)}
  }
- if(enabled===false||enabled===null)return null;
+ if(enabled===false)return null;
+ if(enabled===null)return <p className="muted small" role="status">Checking experimental job monitor availability…</p>;
  return <section className="card broker-jobs">
    <div className="card-head">
     <div><h2><Server size={18}/> Disposable test jobs</h2>
@@ -76,7 +78,8 @@ export default function AdminWorkerJobs({apiBase}:{apiBase:string}){
     <button className="button secondary" onClick={()=>setRevision(n=>n+1)}
       disabled={busy} type="button"><RefreshCw size={14}/> Refresh</button>
    </div>
-   {error&&<div className="browser-flow-error"><AlertTriangle size={15}/>{error}</div>}
+   {error&&<div className="browser-flow-error" role="alert"><AlertTriangle size={15}/>{error}</div>}
+   {refreshedAt&&<p className="muted small" role="status">Job data refreshed {refreshedAt.toLocaleTimeString()}</p>}
    {jobs.length===0?<p className="muted small">No broker jobs have been recorded.</p>:
     <div className="broker-job-list">{jobs.slice(0,30).map(job=>
       <div className="broker-job-row" key={job.id}>
