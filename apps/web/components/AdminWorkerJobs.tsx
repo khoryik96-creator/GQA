@@ -8,6 +8,8 @@ type Job={
  status:"queued"|"running"|"cancelling"|"passed"|"failed"|"cancelled"|"interrupted"|"recovery_pending";
  created_at:string;started_at:string|null;finished_at:string|null;
  failure_kind:string;check_count:number;
+  result_checks?:{name:string;status:"passed"|"failed"}[];
+  screenshot_available?:boolean;
 };
 
 export default function AdminWorkerJobs({apiBase}:{apiBase:string}){
@@ -58,6 +60,13 @@ export default function AdminWorkerJobs({apiBase}:{apiBase:string}){
         <strong>{job.kind==="flow"?"Browser flow":"API/browser smoke"} · {job.id.slice(0,8)}</strong>
         <small>{new Date(job.created_at).toLocaleString()} · {job.check_count} check(s)</small>
         {job.failure_kind&&job.failure_kind!=="none"&&<small>Result: {job.failure_kind.replaceAll("_"," ")}</small>}
+         {(job.result_checks||[]).map((check,index)=>
+           <small key={index}>{check.status==="passed"?"✓":"✕"} {check.name}</small>)}
+         {job.screenshot_available&&
+           <a className="text-button" target="_blank" rel="noreferrer"
+              href={apiBase+"/api/admin/broker-jobs/"+job.id+"/screenshot"}>
+             Inspect stored screenshot
+           </a>}
        </div>
        <span className="pill neutral">{job.status.replaceAll("_"," ")}</span>
        {["queued","running","cancelling"].includes(job.status)&&

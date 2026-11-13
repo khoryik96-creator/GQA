@@ -192,3 +192,11 @@ New project records, QA plans, confirmed memories, browser flows, test
 executions and reviewed repairs retain the authenticated actor account ID.
 Earlier artifacts may have no recorded creator; they are not backfilled.
 Locator repair revision strings are **user-declared**, not verified build SHAs.
+
+### Experimental broker result evidence
+
+The host broker persists bounded check names and statuses without raw page
+or error details. Controlled fixture screenshots up to 1 MB are saved with
+restricted file permissions and exposed only through the global-admin API.
+Retention policies and independent storage encryption remain prerequisites
+for hosting real customer data.
