@@ -37,9 +37,13 @@ jobs:
           expected="$(sha256sum db-migrate/versions/0001_baseline.sql | cut -d ' ' -f1)"
           stored="$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT checksum FROM public.gqa_schema_migrations WHERE version=1')"
           test "$stored" = "$expected"
-          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "1"
+          expected_v2="$(sha256sum db-migrate/versions/0002_history_keyset_indexes.sql | cut -d ' ' -f1)"
+          stored_v2="$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT checksum FROM public.gqa_schema_migrations WHERE version=2')"
+          test "$stored_v2" = "$expected_v2"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('plans_project_created_id','test_runs_project_started_id','browser_flows_project_created_id','memories_project_created_id')")" = "4"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "2"
           docker compose run --rm migrate
-          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "1"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "2"
           echo "PASS: checksummed baseline is recorded and re-running migrations is idempotent"
 
       - name: Verify isolated worker settings and deny external egress

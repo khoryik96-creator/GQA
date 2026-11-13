@@ -48,16 +48,33 @@ jobs:
           set -o pipefail
           docker exec -i gqa-synthetic-benchmark-db psql -X -U postgres -d postgres \
             -v ON_ERROR_STOP=1 < scripts/history_query_benchmark.sql \
-            | tee gqa-history-benchmark-results.txt
-          grep -q 'plans deep page' gqa-history-benchmark-results.txt
-          grep -q 'runs deep page' gqa-history-benchmark-results.txt
-          grep -q 'browser flows deep page' gqa-history-benchmark-results.txt
-          grep -q 'Execution Time' gqa-history-benchmark-results.txt
+            | tee gqa-history-before-indexes.txt
+          grep -q 'plans deep page' gqa-history-before-indexes.txt
+          grep -q 'runs deep page' gqa-history-before-indexes.txt
+          grep -q 'browser flows deep page' gqa-history-before-indexes.txt
+          grep -q 'Execution Time' gqa-history-before-indexes.txt
+      - name: Apply migration 0002 against same dataset (transactional upgrade rehearsal)
+        run: |
+          docker exec -i gqa-synthetic-benchmark-db psql -X -U postgres -d postgres \
+            --single-transaction -v ON_ERROR_STOP=1 < db-migrate/versions/0002_history_keyset_indexes.sql
+          test "$(docker exec gqa-synthetic-benchmark-db psql -U postgres -d postgres -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('plans_project_created_id','test_runs_project_started_id','browser_flows_project_created_id','memories_project_created_id')")" = 4
+      - name: Capture after-index plans on identical 100k-row dataset
+        run: |
+          set -o pipefail
+          docker exec -i gqa-synthetic-benchmark-db psql -X -U postgres -d postgres \
+            -v ON_ERROR_STOP=1 < scripts/history_query_explain.sql \
+            | tee gqa-history-after-indexes.txt
+          grep -q 'plans deep page' gqa-history-after-indexes.txt
+          grep -q 'runs deep page' gqa-history-after-indexes.txt
+          grep -q 'browser flows deep page' gqa-history-after-indexes.txt
+          grep -q 'Execution Time' gqa-history-after-indexes.txt
       - name: Upload measured query plan evidence
         uses: actions/upload-artifact@v4
         with:
           name: gqa-history-query-plans
-          path: gqa-history-benchmark-results.txt
+          path: |
+            gqa-history-before-indexes.txt
+            gqa-history-after-indexes.txt
           if-no-files-found: error
           retention-days: 14
       - name: Disposable database diagnostics
