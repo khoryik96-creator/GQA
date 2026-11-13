@@ -27,6 +27,7 @@ type BrowserFlow struct {
   Digest         string          `json:"digest"`
   GenerationMode string          `json:"generation_mode"`
   Warning        string          `json:"warning"`
+  RevisedFromFlowID string       `json:"revised_from_flow_id,omitempty"`
   RepairSourceFlowID string      `json:"repaired_from_flow_id,omitempty"`
   RepairSourceRunID string       `json:"repaired_from_run_id,omitempty"`
   RepairTarget string            `json:"repair_target,omitempty"`
@@ -41,7 +42,8 @@ func (s *server) browserFlows(w http.ResponseWriter,r *http.Request){
     if pageErr!=nil{fail(w,400,pageErr.Error());return}
     const selectFlows=`
       SELECT id::text,project_id::text,plan_id::text,prompt,objective,steps,digest,generation_mode,warning,
-        COALESCE(repaired_from_flow_id::text,''),COALESCE(repaired_from_run_id::text,''),repair_target,created_at
+        COALESCE(repaired_from_flow_id::text,''),COALESCE(repaired_from_run_id::text,''),repair_target,
+        COALESCE(revised_from_flow_id::text,''),created_at
       FROM browser_flows WHERE project_id=$1::uuid`
     var rows pgx.Rows
     var err error
@@ -61,7 +63,7 @@ func (s *server) browserFlows(w http.ResponseWriter,r *http.Request){
       var stepsJSON []byte
       if err:=rows.Scan(&flow.ID,&flow.ProjectID,&flow.PlanID,&flow.Prompt,
           &flow.Objective,&stepsJSON,&flow.Digest,&flow.GenerationMode,&flow.Warning,
-          &flow.RepairSourceFlowID,&flow.RepairSourceRunID,&flow.RepairTarget,&flow.CreatedAt);err!=nil{
+          &flow.RepairSourceFlowID,&flow.RepairSourceRunID,&flow.RepairTarget,&flow.RevisedFromFlowID,&flow.CreatedAt);err!=nil{
         fail(w,500,"Unable to read browser flow");return
       }
       if err:=json.Unmarshal(stepsJSON,&flow.Steps);err!=nil{fail(w,500,"Invalid saved browser flow");return}
