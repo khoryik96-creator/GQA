@@ -8,7 +8,7 @@ The new `.github/workflows/api-load-recovery.yml` exercises GQA's actual API and
 2. Authenticate an administrator using the existing login endpoint, then create one test project and 40 memory records.
 3. Issue 360 read-only requests through 12 concurrent threads against six endpoints: project listings, paginated memories, paginated plans, paginated runs, paginated browser flows and authenticated session.
 4. Require HTTP 200 and a valid pagination response where applicable; record observed p50/p95/p99/max request latency and error counts in a JSON Actions artifact. This is not a strict speed budget; timing numbers vary by shared CI host.
-5. Stop only the disposable PostgreSQL container, verify authenticated reads do not return successful project data, restart it, and verify the original authenticated session and previously written project records recover.
+5. Stop only the disposable PostgreSQL container, require retryable HTTP 503 (rather than misleading 401 or a successful project response), restart it, and verify the original authenticated session and previously written project records recover.
 6. Remove the disposable Docker volumes and secrets.
 
 ## Safety and constraints
