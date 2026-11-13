@@ -24,7 +24,7 @@ jobs:
         with:
           go-version: "1.27.4"
           cache: false
-      - run: go mod download
+      - run: go mod tidy
       - name: Go static diagnostics
         run: go vet ./...
       - name: Go vulnerability analysis (reachable dependencies)
