@@ -21,7 +21,7 @@ check(/GQA_ADMIN_PASSWORD:\s*\$\{GQA_ADMIN_PASSWORD:\?/.test(compose),
 check(/GQA_RUNNER_TOKEN:\s*\$\{GQA_RUNNER_TOKEN:\?/.test(compose),
  "compose refuses missing internal runner secret");
 check(/POSTGRES_PASSWORD:\s*\$\{GQA_DB_ADMIN_PASSWORD:\?/.test(compose) &&
-      /GQA_DB_ADMIN_PASSWORD:\s*\$\{GQA_DB_ADMIN_PASSWORD:\?/.test(compose) &&
+      [...compose.matchAll(/\$\{GQA_DB_ADMIN_PASSWORD:\?/g)].length === 2 &&
       !compose.includes("gqa_local_only") &&
       /GQA_DB_APP_PASSWORD:\s*\$\{GQA_DB_APP_PASSWORD:\?/.test(compose) &&
       /GQA_SCHEMA_MANAGED:\s*"true"/.test(compose) &&
