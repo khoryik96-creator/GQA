@@ -146,13 +146,20 @@ class JobStore {
     const record={id:crypto.randomUUID(),kind:spec.kind,spec,status:"queued",
       created_at:stamp,updated_at:stamp,started_at:null,finished_at:null,
       failure_kind:"",check_count:0};
-    this.jobs.push(record);this.save();return record;
+    this.jobs.push(record);
+    try{this.save()}catch(err){
+      this.jobs=this.jobs.filter(j=>j!==record);
+      throw err;
+    }
+    return record;
   }
   transition(id,changes){
     const item=this.get(id);
     if(!item)throw new Error("Unknown broker job");
+    const previous={...item};
     Object.assign(item,changes,{updated_at:new Date().toISOString()});
-    this.save();return item;
+    try{this.save()}catch(err){Object.assign(item,previous);throw err}
+    return item;
   }
 }
 
