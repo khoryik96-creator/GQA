@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, useRef, type FormEvent } from "react";
 import {
   Activity, AlertTriangle, ArrowRight, BrainCircuit, CheckCircle2,
   Clock3, Database, FileCode2, FolderKanban, GitBranch, Globe2,
@@ -87,6 +87,10 @@ export default function CommandCenter() {
   const [securityOpen, setSecurityOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // A project switch invalidates all outstanding results from the old tab.
+  const selectedProjectRef = useRef<string | null>(null);
+  selectedProjectRef.current = selectedId;
+  const isCurrentProject = (id:string) => selectedProjectRef.current===id;
   const [plans, setPlans] = useState<Plan[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [inspection, setInspection] = useState<RepoSnapshot | null>(null);
@@ -195,6 +199,7 @@ export default function CommandCenter() {
   }
 
   function clearSessionUI() {
+    selectedProjectRef.current=null;
     setProjects([]);setSelectedId(null);setPlans([]);setMemories([]);setRuns([]);
     setAuthStatus("anonymous");setPassword("");setAccount(null);
     setSecurityOpen(false);setView("command");
@@ -223,6 +228,7 @@ export default function CommandCenter() {
         body: JSON.stringify({ name: projectName, repo_url: repoURL, app_type: appType, stack })
       });
       setProjects(list => [created, ...list]);
+      selectedProjectRef.current=created.id;
       setSelectedId(created.id);
       setShowCreate(false);
       setProjectName(""); setRepoURL(""); setStack("");
@@ -234,67 +240,76 @@ export default function CommandCenter() {
   async function createPlan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedId || !canQA) return;
+    const requestedProject=selectedId;
     setBusy(true); setError("");
     try {
       const plan = await call<Plan>("/api/projects/" + selectedId + "/plans", {
         method: "POST", body: JSON.stringify({ prompt, environment })
       });
-      setPlans(list => [plan, ...list]);
-      if (plan.repository_evidence?.repository) setInspection(plan.repository_evidence);
-    } catch (err) { setError((err as Error).message); }
+      if(isCurrentProject(requestedProject)){
+        setPlans(list => [plan, ...list]);
+        if (plan.repository_evidence?.repository) setInspection(plan.repository_evidence);
+      }
+    } catch (err) { if(isCurrentProject(requestedProject))setError((err as Error).message); }
     finally { setBusy(false); }
   }
 
 
   async function inspectRepository() {
     if (!selectedId || !canQA) return;
+    const requestedProject=selectedId;
     setInspecting(true); setError("");
     try {
       const snapshot = await call<RepoSnapshot>("/api/projects/" + selectedId + "/inspection", { method: "POST" });
-      setInspection(snapshot);
-    } catch (err) { setError((err as Error).message); }
+      if(isCurrentProject(requestedProject))setInspection(snapshot);
+    } catch (err) { if(isCurrentProject(requestedProject))setError((err as Error).message); }
     finally { setInspecting(false); }
   }
 
   async function executeSmoke(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedId || !latest || !canQA) return;
+    const requestedProject=selectedId;
     setRunningSmoke(true); setError("");
     try {
       const result = await call<TestRun>("/api/projects/" + selectedId + "/runs", {
         method: "POST", body: JSON.stringify({ plan_id: latest.id, target_url: smokeTarget })
       });
-      setRuns(list => [result, ...list]);
-    } catch (err) { setError((err as Error).message); }
+      if(isCurrentProject(requestedProject))setRuns(list => [result, ...list]);
+    } catch (err) { if(isCurrentProject(requestedProject))setError((err as Error).message); }
     finally { setRunningSmoke(false); }
   }
 
   async function saveMemory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedId || !canQA) return;
+    const requestedProject=selectedId;
     setSavingMemory(true); setError("");
     try {
       const memory = await call<Memory>("/api/projects/" + selectedId + "/memories", {
         method: "POST",
         body: JSON.stringify({ kind: memoryKind, content: memoryText, supersedes_id: supersedesId })
       });
-      setMemories(list => [
-        memory,
-        ...list.map(m => m.id === supersedesId ? { ...m, status: "superseded" } : m)
-      ]);
-      setMemoryText(""); setSupersedesId("");
-    } catch (err) { setError((err as Error).message); }
+      if(isCurrentProject(requestedProject)){
+        setMemories(list => [
+          memory,
+          ...list.map(m => m.id === supersedesId ? { ...m, status: "superseded" } : m)
+        ]);
+        setMemoryText(""); setSupersedesId("");
+      }
+    } catch (err) { if(isCurrentProject(requestedProject))setError((err as Error).message); }
     finally { setSavingMemory(false); }
   }
 
   async function searchMemories(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedId) return;
+    const requestedProject=selectedId;
     setError("");
     try {
       const result = await call<Memory[]>("/api/projects/" + selectedId + "/memories?q=" + encodeURIComponent(memorySearch));
-      setMemories(result);
-    } catch (err) { setError((err as Error).message); }
+      if(isCurrentProject(requestedProject))setMemories(result);
+    } catch (err) { if(isCurrentProject(requestedProject))setError((err as Error).message); }
   }
 
   function correctMemory(memory: Memory) {
@@ -347,7 +362,7 @@ export default function CommandCenter() {
         <div className="sidebar-section">
           <div className="section-title"><span>PROJECTS</span>{isAdmin&&<button className="icon-btn" title="Create project" onClick={() => setShowCreate(true)}><Plus size={16}/></button>}</div>
           {projects.map(p => (
-            <button key={p.id} className={"project-item " + (selectedId === p.id ? "active" : "")} onClick={() => { setSelectedId(p.id); setView("command"); setError(""); }}>
+            <button key={p.id} className={"project-item " + (selectedId === p.id ? "active" : "")} onClick={() => { selectedProjectRef.current=p.id; setSelectedId(p.id); setView("command"); setError(""); }}>
               <Layers3 size={16}/><span>{p.name}</span>
               {selectedId === p.id && <span className="selected-indicator"/>}
             </button>
