@@ -311,7 +311,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
             <p>Only approved typed operations are allowed; navigation remains relative and at least one assertion is required.</p>
             {editSteps.map((step,i)=><div className="browser-edit-step" key={i}>
               <label>Step {i+1} operation
-                <select value={step.op} disabled={i===0} onChange={e=>changeAction(i,newAction(e.target.value))}>
+                <select value={step.op} disabled={i===0} onChange={e=>setEditSteps(previous=>previous.map((current,j)=>j===i?newAction(e.target.value):current))}>
                   {(["navigate","click_role","fill_label","assert_text","assert_visible_role","assert_url_path"] as const).map(op=>
                     <option value={op} key={op}>{op.replaceAll("_"," ")}</option>)}
                 </select>
