@@ -368,9 +368,19 @@ func (s *server) plans(w http.ResponseWriter, r *http.Request) {
   id, ok := validProjectID(w,r)
   if !ok { return }
   if r.Method == http.MethodGet {
-    rows, err := s.db.Query(r.Context(),
-      "SELECT p.id::text,p.project_id::text,p.request_id::text,q.prompt,q.environment,p.selected_agents,p.warnings,p.approval_required,p.status,p.created_at,p.consulted_memories,p.repo_context,p.test_spec FROM plans p JOIN qa_requests q ON q.id=p.request_id WHERE p.project_id=$1::uuid ORDER BY p.created_at DESC LIMIT 50",
-      id)
+    limit,cursor,paged,pageErr:=parseHistoryPageRequest(r)
+    if pageErr!=nil{fail(w,400,pageErr.Error());return}
+    const selectPlans="SELECT p.id::text,p.project_id::text,p.request_id::text,q.prompt,q.environment,p.selected_agents,p.warnings,p.approval_required,p.status,p.created_at,p.consulted_memories,p.repo_context,p.test_spec FROM plans p JOIN qa_requests q ON q.id=p.request_id WHERE p.project_id=$1::uuid"
+    var rows pgx.Rows
+    var err error
+    if paged{
+      rows,err=s.db.Query(r.Context(),selectPlans+
+        " AND ($2::timestamptz IS NULL OR (p.created_at,p.id)<($2::timestamptz,$3::uuid)) ORDER BY p.created_at DESC,p.id DESC LIMIT $4",
+        id,historyCursorTime(cursor),historyCursorID(cursor),limit+1)
+    }else{
+      rows,err=s.db.Query(r.Context(),selectPlans+
+        " ORDER BY p.created_at DESC,p.id DESC LIMIT 50",id)
+    }
     if err != nil { fail(w,500,"Unable to retrieve plans"); return }
     defer rows.Close()
     plans := []Plan{}
@@ -387,7 +397,15 @@ func (s *server) plans(w http.ResponseWriter, r *http.Request) {
       plans = append(plans,p)
     }
     if rows.Err() != nil { fail(w,500,"Unable to read plans"); return }
-    writeJSON(w,200,plans)
+    if paged{
+      nextCursor:=""
+      if len(plans)>limit{
+        plans=plans[:limit]
+        last:=plans[len(plans)-1]
+        nextCursor=historyNextCursor(last.CreatedAt,last.ID)
+      }
+      writeJSON(w,200,listPage[Plan]{Items:plans,NextCursor:nextCursor})
+    }else{writeJSON(w,200,plans)}
     return
   }
 
