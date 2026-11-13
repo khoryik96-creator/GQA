@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: gqa
       POSTGRES_USER: gqa
-      POSTGRES_PASSWORD: gqa_local_only
+      POSTGRES_PASSWORD: ${GQA_DB_ADMIN_PASSWORD:?Set GQA_DB_ADMIN_PASSWORD in .env}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gqa -d gqa"]
       interval: 5s
@@ -22,7 +22,7 @@ services:
     networks:
       - db_private
     environment:
-      DATABASE_URL: postgres://gqa:gqa_local_only@db:5432/gqa?sslmode=disable
+      DATABASE_URL: postgres://gqa:${GQA_DB_ADMIN_PASSWORD:?Set GQA_DB_ADMIN_PASSWORD in .env}@db:5432/gqa?sslmode=disable
       GQA_DB_APP_PASSWORD: ${GQA_DB_APP_PASSWORD:?Set GQA_DB_APP_PASSWORD in .env}
     depends_on:
       db:
