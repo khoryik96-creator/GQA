@@ -2,8 +2,8 @@
 
 import {useEffect,useMemo,useState} from "react";
 import {
- AlertTriangle,Activity,ArrowDownRight,ArrowUpRight,BarChart3,
- CheckCircle2,ChevronDown,ChevronUp,Clock3,RefreshCw,ShieldCheck
+ AlertTriangle,Activity,BarChart3,
+ CheckCircle2,ChevronDown,ChevronUp,RefreshCw,ShieldCheck
 } from "lucide-react";
 
 type QualityPoint={run_id:string;status:"passed"|"failed";started_at:string};
@@ -40,7 +40,7 @@ function shortDate(raw:string){
  return new Date(raw).toLocaleString(undefined,{dateStyle:"medium",timeStyle:"short"});
 }
 
-function Scenario({item,apiBase}:{item:QualityCase;apiBase:string}){
+function Scenario({item}:{item:QualityCase}){
  const [expanded,setExpanded]=useState(false);
  const isPositive=positive.has(item.transition);
  return <article className={"quality-scenario "+(item.status==="failed"?"quality-failure":"")}>
@@ -162,9 +162,10 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
       <div className="quality-bars">
        {report.daily.map(day=>{
         const total=day.passed+day.failed,pass=total===0?0:day.passed/total*100;
+        const max=Math.max(1,...report.daily.map(d=>d.passed+d.failed));
         return <div key={day.date} className="quality-day" title={day.date+": "+day.passed+" passed, "+day.failed+" failed"}>
          <strong>{total}</strong>
-         <div className="quality-stack">
+         <div className="quality-stack" style={{height:Math.max(18,Math.round(115*total/max))}}>
           <div className="quality-stack-fail" style={{height:(100-pass)+"%"}}/>
           <div className="quality-stack-pass" style={{height:pass+"%"}}/>
          </div>
@@ -195,7 +196,7 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
       <p>No scenarios match this filter.</p>}
    </div>}
    <div className="quality-scenarios">
-    {filtered.map(item=><Scenario key={item.id} item={item} apiBase={apiBase}/>)}
+    {filtered.map(item=><Scenario key={item.id} item={item}/>)}
    </div>
    <p className="fine-print quality-disclaimer">
     A regression means the same flow or smoke plan passed previously and now fails on the same origin.

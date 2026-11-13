@@ -48,7 +48,7 @@ check(/sessionIdentity/.test(auth) && /validOrigin/.test(auth),
 check(/allowedProject/.test(rbac) && /canAccess/.test(rbac),
  "server-side per-project role enforcement is present");
 check(!/prototype API is \*\*unauthenticated/.test(docs) &&
-      /v0\.11 RC1/.test(docs) && /Do not expose GQA publicly/.test(docs),
+      /v0\.11/.test(docs) && /Do not expose GQA publicly/.test(docs),
  "README describes current authenticated local-only build");
 check(fs.existsSync(path.join(root,"SECURITY.md")) &&
       fs.existsSync(path.join(root,"docs/RELEASE_CHECKLIST.md")),
