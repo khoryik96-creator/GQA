@@ -8,6 +8,7 @@ import (
  "errors"
  "path/filepath"
  "github.com/jackc/pgx/v5/pgxpool"
+ "github.com/jackc/pgx/v5/pgconn"
 )
 
 // A local one-instance API can safely mark in-flight runs left by a previous
@@ -22,6 +23,26 @@ func reconcileOrphanedRuns(ctx context.Context,db *pgxpool.Pool)error{
   WHERE status='running'`)
  return err
 }
+// Browser requests can disappear while a worker is running. Startup recovery
+// handles process restarts; this periodic sweep also covers a live process
+// that could not finalize a run after the client disconnected or DB recovered.
+// Five minutes exceeds the supported synchronous worker/API deadline.
+const staleRunningRunsSQL = `
+ UPDATE test_runs SET status='interrupted', finished_at=now(),
+  checks='[{"name":"Runner interrupted","status":"failed","duration_ms":0,"detail":"Execution exceeded the recovery deadline without durable results"}]'::jsonb,
+  evidence='{"failure_kind":"runner_interrupted","worker_lifecycle":"unverified","console_errors":0,"page_exceptions":0,"failed_requests":0,"http_5xx":0}'::jsonb,
+  screenshot_available=false
+ WHERE status='running' AND started_at < now() - interval '5 minutes'
+`
+
+type staleRunExecutor interface {
+ Exec(context.Context,string,...any)(pgconn.CommandTag,error)
+}
+func reconcileExpiredRunningRuns(ctx context.Context,db staleRunExecutor)error{
+ _,err:=db.Exec(ctx,staleRunningRunsSQL)
+ return err
+}
+
 func pruneExpiredMetadata(ctx context.Context,db *pgxpool.Pool)error{
  if _,err:=db.Exec(ctx,`DELETE FROM auth_sessions
   WHERE expires_at<now()-interval '1 day'
@@ -30,12 +51,18 @@ func pruneExpiredMetadata(ctx context.Context,db *pgxpool.Pool)error{
  return err
 }
 func maintainLocalMetadata(ctx context.Context,db *pgxpool.Pool){
- ticker:=time.NewTicker(time.Hour)
- defer ticker.Stop()
+ cleanupTicker:=time.NewTicker(time.Hour)
+ staleTicker:=time.NewTicker(time.Minute)
+ defer cleanupTicker.Stop()
+ defer staleTicker.Stop()
  for {
   select{
   case <-ctx.Done():return
-  case <-ticker.C:
+  case <-staleTicker.C:
+   op,done:=context.WithTimeout(ctx,10*time.Second)
+   _=reconcileExpiredRunningRuns(op,db)
+   done()
+  case <-cleanupTicker.C:
    op,done:=context.WithTimeout(ctx,10*time.Second)
    _=pruneExpiredMetadata(op,db)
    _=pruneScreenshots(op,db)
