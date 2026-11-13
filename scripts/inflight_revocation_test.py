@@ -119,7 +119,24 @@ finally:
     if paused:
         subprocess.run(["docker", "compose", "unpause", "runner"], check=True, timeout=20)
 
-# Authorized QA execution remains functional after the paused runner returns.
+# A cancelled HTTP request can leave the isolated single-slot runner finishing
+# its own child process briefly after the API returns. Do not race it by
+# immediately submitting a new job; wait for its actual /healthz busy flag.
+probe = ("fetch('http://127.0.0.1:8090/healthz',"
+         "{signal:AbortSignal.timeout(3000)})"
+         ".then(r=>r.json()).then(x=>process.exit(x.busy?1:0))"
+         ".catch(()=>process.exit(1))")
+for attempt in range(60):
+    health = subprocess.run(["docker", "compose", "exec", "-T", "runner",
+                             "node", "-e", probe], capture_output=True,
+                            text=True, timeout=8)
+    if health.returncode == 0:
+        break
+    time.sleep(1)
+else:
+    raise AssertionError("Runner remained busy or unhealthy after cancellation")
+
+# Authorized QA execution remains functional when the runner becomes idle.
 status, _ = call(admin, prefix + "/members", {"email": email, "role": "qa"})
 assert status == 200
 status, restored = call(qa, prefix + "/flows/" + flow["id"] + "/execute", {
