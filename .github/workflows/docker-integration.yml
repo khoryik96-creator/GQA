@@ -655,6 +655,11 @@ jobs:
           print("PASS: memory-aware QA planning, real API/browser checks, screenshot, production block, typed browser flows, reviewable repairs, admin login, CSRF checks and logout")
           PY
 
+      - name: Revoke in-flight QA member while the isolated runner is paused
+        env:
+          GQA_ISOLATED_REVOCATION_TEST: "YES"
+        run: python3 scripts/inflight_revocation_test.py
+
       - name: Stack diagnostics on failure
         if: failure()
         run: docker compose logs --no-color --tail 120
