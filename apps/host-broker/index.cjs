@@ -109,7 +109,10 @@ const server=http.createServer(async(req,res)=>{
     const kind=route==="/jobs"?input?.kind:route==="/flow"?"flow":"smoke";
     const job=jobFromInput(kind,input);
     if(route==="/jobs"){
-      const queued=scheduler.enqueue(job);
+      // Optional for legacy clients; recommended for every async submission.
+      // A caller must reuse the same lowercase UUID after a lost response.
+      const key=req.headers["idempotency-key"];
+      const queued=scheduler.enqueue(job,key);
       return respond(res,202,queued);
     }
     // Compatibility: existing Go API expects the original synchronous

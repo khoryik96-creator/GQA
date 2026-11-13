@@ -146,10 +146,13 @@ jobs:
           with open(".env",encoding="utf-8") as f:
               token=next(row.split("=",1)[1].strip() for row in f
                          if row.startswith("GQA_RUNNER_TOKEN="))
-          def call(path,data=None):
+          def call(path,data=None,key=None):
+              headers={"X-GQA-Runner-Token":token,"Content-Type":"application/json"}
+              if key is not None:
+                  headers["Idempotency-Key"]=key
               req=urllib.request.Request(BASE+path,method="POST" if data is not None else "GET",
                   data=json.dumps(data).encode() if data is not None else None,
-                  headers={"X-GQA-Runner-Token":token,"Content-Type":"application/json"})
+                  headers=headers)
               with urllib.request.urlopen(req,timeout=65) as res:
                   return res.status,json.load(res)
 
@@ -162,10 +165,20 @@ jobs:
           else:
               raise AssertionError("Broker job status was anonymously accessible")
 
-          status,queued=call("/jobs",{
-              "kind":"smoke","target_url":"http://fixture:8081",
-              "run_api":True,"run_web":False})
+          key="aa123456-7890-4abc-8def-0123456789ab"
+          fixture={"kind":"smoke","target_url":"http://fixture:8081",
+                   "run_api":True,"run_web":False}
+          status,queued=call("/jobs",fixture,key=key)
           assert status==202 and queued["id"],queued
+          status,retried=call("/jobs",fixture,key=key)
+          assert status==202 and retried["id"]==queued["id"]
+          try:
+              call("/jobs",{**fixture,"run_web":True},key=key)
+          except urllib.error.HTTPError as exc:
+              assert exc.code==409,exc.code
+          else:
+              raise AssertionError("Conflicting request reused an idempotency key")
+          print("PASS: async HTTP retries return one durable job ID and reject key reuse")
           for _ in range(60):
               _,tracked=call("/jobs/"+queued["id"])
               if tracked["status"] in ("passed","failed","cancelled","interrupted"):break
