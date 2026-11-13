@@ -19,6 +19,7 @@ review browser flows, and retain test results and verified corrections.
 | --- | --- |
 | Projects and memory | Multiple projects, confirmed/corrected requirements and project-level QA lessons |
 | Planning | Deterministic principal-QA agent routing and structured test specifications; optional configured LLM provider |
+| AI code review | Model review of public repository source with evidence-checked findings, severity, fixes and coverage gaps (DeepSeek default; OpenAI, Gemini or Claude) |
 | Repository inspection | Read-only inspection of **public** GitHub repositories |
 | Test execution | Approved API GET and browser smoke tests against bundled local fixtures |
 | Browser flows | Reviewable, typed Playwright actions with exact-digest acknowledgement and stored screenshots |
@@ -164,16 +165,27 @@ of sessions across browsers. Administrators may suspend or recover ordinary
 member accounts. Requests are protected with server-enforced project
 permissions and origin-checked cookie sessions.
 
-## AI planning is optional
+## AI providers and code review (v0.20)
 
 The default QA planner is deterministic and labelled as such in the UI.
-An OpenAI-compatible chat completions provider can be configured through
-`GQA_LLM_CHAT_COMPLETIONS_URL`, `GQA_LLM_MODEL` and `GQA_LLM_API_KEY`.
-`GQA_LLM_SEND_PROJECT_CONTEXT` controls whether project context may be sent
-to the provider and defaults to `false`. Do not send sensitive company
-information to an external provider without authorization.
+Configure one model provider to enable AI planning, browser-flow drafting
+and the **Code Review** tab:
 
-The specialist execution engine and LLM planner are separate. Connecting
+```env
+GQA_LLM_PROVIDER=deepseek   # deepseek (default) | openai | gemini | anthropic | custom
+GQA_LLM_API_KEY=<provider API key>
+GQA_LLM_MODEL=              # optional; required for gemini and custom
+GQA_LLM_SEND_PROJECT_CONTEXT=true
+```
+
+`GQA_LLM_SEND_PROJECT_CONTEXT` defaults to `false`. Code review sends
+repository **source code** to the selected provider, so do not enable it for
+code you are not authorized to share. Code review findings stay `suspected`
+until reproduced by a test, and a review with no findings does not prove the
+code is correct. See [AI code review](docs/AI_CODE_REVIEW.md) for provider
+defaults, the evidence check and limits.
+
+The specialist execution engine and the model are separate. Connecting
 a model does not grant it autonomous shell commands or permission to run
 tests against external targets.
 
@@ -258,6 +270,7 @@ divergent hardening implementation, not an additional release to merge blindly.
 
 ## Documentation
 
+- [AI providers and code review](docs/AI_CODE_REVIEW.md)
 - [Historical milestone instructions, v0.1–v0.11](docs/version-history.md)
 - [Release acceptance checklist](docs/RELEASE_CHECKLIST.md)
 - [Architecture and threat boundaries](docs/architecture/)
