@@ -48,6 +48,8 @@ type Memory = {
   source: string; status: string; supersedes_id: string; created_at: string;
 };
 type MemoryPage = { items: Memory[]; next_cursor: string };
+type PlanPage = { items: Plan[]; next_cursor: string };
+type RunPage = { items: TestRun[]; next_cursor: string };
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 const icons: Record<string, LucideIcon> = {
@@ -98,6 +100,10 @@ export default function CommandCenter() {
   selectedProjectRef.current = selectedId;
   const isCurrentProject = (id:string) => selectedProjectRef.current===id;
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [planCursor, setPlanCursor] = useState("");
+  const [runCursor, setRunCursor] = useState("");
+  const [loadingHistory, setLoadingHistory] = useState<"plans" | "runs" | null>(null);
+  const historyRequestVersion = useRef(0);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [inspection, setInspection] = useState<RepoSnapshot | null>(null);
   const [runs, setRuns] = useState<TestRun[]>([]);
@@ -183,28 +189,34 @@ export default function CommandCenter() {
     setPlans([]);
     setMemories([]);
     setRuns([]);
+    setPlanCursor(""); setRunCursor("");
+    const historyVersion=++historyRequestVersion.current;
     setInspection(null);
     setMemoryNextCursor("");
     setActiveMemoryQuery("");
     const memoryVersion = ++memoryRequestVersion.current;
     const prefix = "/api/projects/" + requestedProject;
     Promise.allSettled([
-      call<Plan[]>(prefix + "/plans", { signal: controller.signal }),
+      call<PlanPage>(prefix + "/plans?limit=25", { signal: controller.signal }),
       call<MemoryPage>(prefix + "/memories?limit=25", { signal: controller.signal }),
-      call<TestRun[]>(prefix + "/runs", { signal: controller.signal })
+      call<RunPage>(prefix + "/runs?limit=25", { signal: controller.signal })
     ]).then(results => {
       if (controller.signal.aborted || !isCurrentProject(requestedProject)) return;
       const [plansResult, memoriesResult, runsResult] = results;
-      if (plansResult.status === "fulfilled") {
-        setPlans(plansResult.value);
-        const snapshot = plansResult.value[0]?.repository_evidence;
+      if (plansResult.status === "fulfilled" && historyRequestVersion.current===historyVersion) {
+        setPlans(plansResult.value.items);
+        setPlanCursor(plansResult.value.next_cursor);
+        const snapshot = plansResult.value.items[0]?.repository_evidence;
         if (snapshot?.repository) setInspection(snapshot);
       }
       if (memoriesResult.status === "fulfilled" && memoryRequestVersion.current === memoryVersion) {
         setMemories(memoriesResult.value.items);
         setMemoryNextCursor(memoriesResult.value.next_cursor);
       }
-      if (runsResult.status === "fulfilled") setRuns(runsResult.value);
+      if (runsResult.status === "fulfilled" && historyRequestVersion.current===historyVersion) {
+        setRuns(runsResult.value.items);
+        setRunCursor(runsResult.value.next_cursor);
+      }
       const failed = results.flatMap((result, i) => result.status === "rejected"
         ? [["QA plans", "project memory", "test runs"][i]] : []);
       if (failed.length) setError("Unable to load " + failed.join(", ") + ". Other project data remains available.");
@@ -221,6 +233,8 @@ export default function CommandCenter() {
     // React update as selection, before another project's panel can render.
     selectedProjectRef.current = id;
     memoryRequestVersion.current++;
+    historyRequestVersion.current++;
+    setLoadingHistory(null);setPlanCursor("");setRunCursor("");
     setPlans([]); setMemories([]); setRuns([]); setInspection(null);
     setMemoryNextCursor(""); setActiveMemoryQuery(""); setLoadingMemories(false);
     setMemoryText(""); setSupersedesId(""); setMemorySearch("");
@@ -393,6 +407,41 @@ export default function CommandCenter() {
     }finally{
       if(isCurrentProject(requestedProject)&&memoryRequestVersion.current===version)
         setLoadingMemories(false);
+    }
+  }
+
+  async function loadMoreHistory(kind:"plans"|"runs"){
+    const requestedProject=selectedId;
+    const cursor=kind==="plans"?planCursor:runCursor;
+    if(!requestedProject||!cursor||loadingHistory)return;
+    const requestVersion=historyRequestVersion.current;
+    setLoadingHistory(kind);setError("");
+    try{
+      const path="/api/projects/"+requestedProject+"/"+kind+
+        "?limit=25&cursor="+encodeURIComponent(cursor);
+      if(kind==="plans"){
+        const page=await call<PlanPage>(path);
+        if(!isCurrentProject(requestedProject)||historyRequestVersion.current!==requestVersion)return;
+        setPlans(prev=>{
+          const ids=new Set(prev.map(item=>item.id));
+          return [...prev,...page.items.filter(item=>!ids.has(item.id))];
+        });
+        setPlanCursor(page.next_cursor);
+      }else{
+        const page=await call<RunPage>(path);
+        if(!isCurrentProject(requestedProject)||historyRequestVersion.current!==requestVersion)return;
+        setRuns(prev=>{
+          const ids=new Set(prev.map(item=>item.id));
+          return [...prev,...page.items.filter(item=>!ids.has(item.id))];
+        });
+        setRunCursor(page.next_cursor);
+      }
+    }catch(err){
+      if(isCurrentProject(requestedProject)&&historyRequestVersion.current===requestVersion)
+        setError("Unable to load older "+kind+": "+(err as Error).message);
+    }finally{
+      if(isCurrentProject(requestedProject)&&historyRequestVersion.current===requestVersion)
+        setLoadingHistory(null);
     }
   }
 
@@ -609,7 +658,21 @@ export default function CommandCenter() {
                       <p className="fine-print">Public GitHub metadata only; private repository authentication will be added later.</p>
                     </section>
                     <section className="card side-card"><div className="card-head"><div><h2><Activity size={17}/> Project overview</h2></div></div><div className="stat-list"><div><span>QA plans</span><strong>{plans.length}</strong></div><div><span>Memories in view</span><strong>{memories.length}</strong></div><div><span>Smoke runs</span><strong>{runs.length}</strong></div></div></section>
-                    <section className="card side-card"><div className="card-head"><div><h2><History size={17}/> Previous requests</h2></div></div>{plans.length === 0 ? <p className="muted small">Requests will appear here after you create a QA plan.</p> : <div className="history-list">{plans.slice(0,7).map(p => <div className="history-item" key={p.id}><span className="history-marker"/><div><p>{p.prompt}</p><small><Clock3 size={12}/>{when(p.created_at)} · {p.environment}</small></div></div>)}</div>}</section>
+                    <section className="card side-card"><div className="card-head"><div><h2><History size={17}/> Previous requests</h2></div></div>{plans.length === 0 ? <p className="muted small">Requests will appear here after you create a QA plan.</p> : <div className="history-list">{plans.map(p => <div className="history-item" key={p.id}><span className="history-marker"/><div><p>{p.prompt}</p><small><Clock3 size={12}/>{when(p.created_at)} · {p.environment}</small></div></div>)}</div>}
+                      {planCursor&&<button className="button secondary" type="button" disabled={!!loadingHistory}
+                        onClick={()=>loadMoreHistory("plans")}>{loadingHistory==="plans"?"Loading…":"Load older plans"}</button>}
+                    </section>
+                    <section className="card side-card">
+                      <div className="card-head"><div><h2><Activity size={17}/> Execution history</h2><p>Most recent project runs, including browser flows.</p></div></div>
+                      {runs.length===0?<p className="muted small">No execution records yet.</p>:
+                        <div className="history-list">{runs.map(run=><div className="history-item" key={run.id}>
+                          <span className="history-marker"/><div><p>{run.status} · {run.execution_kind||"smoke"}</p>
+                          <small>{when(run.started_at)} · {run.target_url}</small></div>
+                        </div>)}</div>}
+                      {runCursor&&<button className="button secondary" type="button"
+                        disabled={!!loadingHistory} onClick={()=>loadMoreHistory("runs")}>
+                        {loadingHistory==="runs"?"Loading…":"Load older runs"}</button>}
+                    </section>
                     <section className="card side-card help-card"><ShieldCheck size={22}/><strong>Memory-first architecture</strong><p>Document requirements, corrections and lessons so future QA plans can use verified project context.</p><button className="text-button" onClick={() => setView("memory")}>Open project memory <ArrowRight size={15}/></button></section>
                   </div>
                 </div>
