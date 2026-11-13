@@ -226,8 +226,9 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
   body,_:=json.Marshal(map[string]any{"target_url":input.TargetURL,"steps":flow.Steps})
   endpoint:=os.Getenv("GQA_RUNNER_FLOW_URL")
   if endpoint==""{endpoint="http://runner:8090/flow"}
-  ctx,cancel:=context.WithTimeout(context.Background(),80*time.Second)
+  ctx,cancel:=context.WithTimeout(r.Context(),80*time.Second)
   defer cancel()
+  go s.monitorExecutionPermission(ctx,cancel,r,projectID)
   reply:=workerReply{Checks:[]SmokeCheck{}}
   req,err:=http.NewRequestWithContext(ctx,http.MethodPost,endpoint,bytes.NewReader(body))
   if err==nil{
@@ -251,8 +252,14 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
    }
    finalCtx,finishCancel:=context.WithTimeout(context.Background(),10*time.Second)
    defer finishCancel()
+   stillAuthorized,permissionErr:=s.executionStillAuthorized(finalCtx,r,projectID)
+   if permissionErr!=nil || !stillAuthorized {
+     reply=recordedRunnerFailure("Execution authorization revoked or unavailable")
+   }
    if err:=persistFlowEvidence(finalCtx,s,&run,reply);err!=nil{
     fail(w,500,"Browser run finished but results could not be saved");return
   }
+  if permissionErr!=nil{fail(w,503,"Execution authorization check unavailable");return}
+  if !stillAuthorized{fail(w,403,"Execution authorization revoked during the run");return}
   writeJSON(w,201,run)
 }
