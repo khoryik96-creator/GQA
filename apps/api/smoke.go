@@ -141,13 +141,13 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   runnerURL:=os.Getenv("GQA_RUNNER_URL")
   if runnerURL==""{runnerURL="http://runner:8090/run"}
   // Execute with a bounded context detached from the browser connection.
-  ctx,cancel:=context.WithTimeout(context.WithoutCancel(r.Context()),30*time.Second)
+  ctx,cancel:=context.WithTimeout(context.WithoutCancel(r.Context()),65*time.Second)
   defer cancel()
   req,err:=http.NewRequestWithContext(ctx,http.MethodPost,runnerURL,bytes.NewReader(body))
   if err!=nil{fail(w,500,"Unable to initialize runner request");return}
   req.Header.Set("Content-Type","application/json")
   req.Header.Set("X-GQA-Runner-Token",os.Getenv("GQA_RUNNER_TOKEN"))
-  resp,err:=(&http.Client{Timeout:30*time.Second}).Do(req)
+  resp,err:=(&http.Client{Timeout:65*time.Second,CheckRedirect:func(*http.Request,[]*http.Request)error{return http.ErrUseLastResponse}}).Do(req)
   reply:=workerReply{Checks:[]SmokeCheck{}}
   if err==nil{
     defer resp.Body.Close()

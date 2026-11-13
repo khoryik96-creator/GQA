@@ -90,6 +90,8 @@ func main() {
    for range ticker.C{
     ctx,cancel:=context.WithTimeout(context.Background(),10*time.Second)
     if err:=s.reconcileStaleRuns(ctx);err!=nil{log.Printf("run recovery: %v",err)}
+    if err:=s.cleanupExpiredSessions(ctx);err!=nil{log.Printf("session cleanup: %v",err)}
+    if err:=s.cleanupExpiredLocatorCache(ctx);err!=nil{log.Printf("locator cache cleanup: %v",err)}
     cancel()
    }
   }()

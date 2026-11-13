@@ -36,3 +36,7 @@ func (s *server) cleanupExpiredSessions(ctx context.Context)error{
    OR revoked_at<now()-interval '30 days'`)
  return err
 }
+func (s *server) cleanupExpiredLocatorCache(ctx context.Context)error{
+ _,err:=s.db.Exec(ctx,`DELETE FROM browser_locator_cache WHERE expires_at<now()`)
+ return err
+}

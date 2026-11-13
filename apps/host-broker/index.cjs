@@ -117,7 +117,7 @@ const server=http.createServer(async(req,res)=>{
     return respond(res,err.status||500,{error:err.status?err.message:"Unable to schedule job"});
   }
 });
-server.requestTimeout=70000;
+server.requestTimeout=90000;
 // Claim the operating-system TCP listener BEFORE touching the journal or
 // starting queued jobs. A second broker on the same bind/port cannot race
 // the first broker to replay persisted work.
