@@ -246,3 +246,19 @@ select, input { color: #dfebf6; border: 1px solid #2a4053; border-radius: 9px; b
   .topbar-actions { flex: 0 1 auto; gap: 6px; min-width: 0; flex-wrap: wrap; }
   .topbar-actions .button { min-height: 34px; padding: 7px 9px; font-size: 11px; }
 }
+
+/* Intermediate tablet widths keep the sidebar but have insufficient room
+   for the project breadcrumb and account controls in one rigid topbar row. */
+@media (min-width: 761px) and (max-width: 1100px) {
+  .topbar {
+    height: auto;
+    min-height: 73px;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 20px;
+  }
+  .breadcrumb { min-width: 0; flex: 1 1 150px; overflow: hidden; }
+  .breadcrumb strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-actions { min-width: 0; flex: 0 1 auto; flex-wrap: wrap; gap: 8px; }
+}
