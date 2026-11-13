@@ -355,7 +355,7 @@ export default function CommandCenter() {
     const requestedProject=selectedId;
     const query=memorySearch.trim();
     const version=++memoryRequestVersion.current;
-    setLoadingMemories(true);setError("");setMemoryNextCursor("");
+    setLoadingMemories(true);setError("");
     try {
       const page=await call<MemoryPage>("/api/projects/"+requestedProject+
         "/memories?limit=25&q="+encodeURIComponent(query));
