@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: gqa
       POSTGRES_USER: gqa
-      POSTGRES_PASSWORD: gqa_local_only
+      POSTGRES_PASSWORD: ${GQA_DB_ADMIN_PASSWORD:-gqa_local_only}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gqa -d gqa"]
       interval: 5s
@@ -12,6 +12,25 @@ services:
       retries: 20
     volumes:
       - gqa_pgdata:/var/lib/postgresql/data
+    networks:
+      - storage
+
+  # Database DDL runs under a separate, short-lived admin container.
+  migrate:
+    image: postgres:16-alpine
+    networks:
+      - storage
+    environment:
+      PGPASSWORD: ${GQA_DB_ADMIN_PASSWORD:-gqa_local_only}
+      GQA_DB_APP_PASSWORD: ${GQA_DB_APP_PASSWORD:?Set GQA_DB_APP_PASSWORD in .env}
+    volumes:
+      - ./apps/api/schema.sql:/migrations/schema.sql:ro
+      - ./db-migrate/roles.sql:/migrations/roles.sql:ro
+      - ./db-migrate/migrate.sh:/migrations/migrate.sh:ro
+    entrypoint: ["sh","/migrations/migrate.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
 
   api:
     build: ./apps/api
@@ -20,12 +39,14 @@ services:
     networks:
       - default
       - qa_private
+      - storage
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     environment:
-      DATABASE_URL: postgres://gqa:gqa_local_only@db:5432/gqa?sslmode=disable
+      DATABASE_URL: postgres://gqa_app:${GQA_DB_APP_PASSWORD:?Set GQA_DB_APP_PASSWORD in .env}@db:5432/gqa?sslmode=disable
+      GQA_SCHEMA_MANAGED: "true"
       PORT: "8080"
       ALLOWED_ORIGIN: http://localhost:3000
       GQA_ADMIN_PASSWORD: ${GQA_ADMIN_PASSWORD:?Set GQA_ADMIN_PASSWORD in .env}
@@ -45,8 +66,8 @@ services:
     volumes:
       - gqa_evidence:/evidence
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       runner:
         condition: service_healthy
       fixture:
@@ -126,6 +147,9 @@ volumes:
 # Browser test containers have no external network egress by default.
 # The API uses both networks because it needs GitHub and approved LLM access.
 networks:
+  # The web and QA workers cannot directly reach PostgreSQL.
+  storage:
+    internal: true
   qa_private:
     internal: true
 
