@@ -116,14 +116,15 @@ func (s *server) proposeRepair(w http.ResponseWriter,r *http.Request){
   Warning:warning,RepairSourceFlowID:flowID,RepairSourceRunID:input.FailedRunID,
   RepairTarget:targetURL,
  }
+ actor,_:=currentAccount(r)
  err=s.db.QueryRow(r.Context(),`
   INSERT INTO browser_flows (
    project_id,plan_id,prompt,objective,steps,digest,generation_mode,warning,
-   repaired_from_flow_id,repaired_from_run_id,repair_target)
-  VALUES($1::uuid,$2::uuid,$3,$4,$5::jsonb,$6,'rules',$7,$8::uuid,$9::uuid,$10)
+   repaired_from_flow_id,repaired_from_run_id,repair_target,created_by)
+  VALUES($1::uuid,$2::uuid,$3,$4,$5::jsonb,$6,'rules',$7,$8::uuid,$9::uuid,$10,$11::uuid)
   RETURNING id::text,created_at`,
   projectID,planID,prompt,objective,string(stepsRaw),newDigest,warning,
-  flowID,input.FailedRunID,targetURL).
+  flowID,input.FailedRunID,targetURL,actor.ID).
   Scan(&revised.ID,&revised.CreatedAt)
  if err!=nil{fail(w,409,"A repair may already exist for this failed run");return}
  writeJSON(w,201,revised)
@@ -180,7 +181,7 @@ func (s *server) confirmRepair(w http.ResponseWriter,r *http.Request){
  err=tx.QueryRow(r.Context(),"SELECT id::text FROM repair_acceptances WHERE repaired_flow_id=$1::uuid",flowID).Scan(&existingID)
  if err==nil{fail(w,409,"Repair has already been accepted");return}
  if !errors.Is(err,pgx.ErrNoRows){fail(w,500,"Unable to check repair acceptance");return}
- note:=fmt.Sprintf("Validated UI locator correction for revision %s at authorized target %s: in browser step %d, the %s accessible name changed from %q to %q. Original test assertions passed after a separately reviewed replay. This is a version-scoped testing lesson, not a change to product requirements.",
+ note:=fmt.Sprintf("Validated UI locator correction for user-declared revision %s at authorized target %s: in browser step %d, the %s accessible name changed from %q to %q. Original test assertions passed after a separately reviewed replay. This is a version-scoped testing lesson, not a change to product requirements.",
   input.Revision,targetURL,hint.StepIndex+1,hint.Role,hint.OriginalName,hint.ProposedName)
  var memoryID string
  err=tx.QueryRow(r.Context(),`
@@ -188,6 +189,7 @@ func (s *server) confirmRepair(w http.ResponseWriter,r *http.Request){
   VALUES($1::uuid,'lesson',$2,'verified_qa_repair','confirmed') RETURNING id::text`,
   projectID,note).Scan(&memoryID)
  if err!=nil{fail(w,500,"Unable to record repair lesson");return}
+ actor,_:=currentAccount(r)
  var accepted RepairReview
  accepted=RepairReview{
   RepairedFlowID:flowID,RepairedFromFlowID:sourceFlowID,OriginalFailureRunID:failedRunID,
@@ -197,11 +199,11 @@ func (s *server) confirmRepair(w http.ResponseWriter,r *http.Request){
  err=tx.QueryRow(r.Context(),`
   INSERT INTO repair_acceptances(
    project_id,original_flow_id,repaired_flow_id,original_failure_run_id,verified_run_id,
-   app_revision,target_url,step_index,old_name,new_name,memory_id)
-  VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11::uuid)
+   app_revision,target_url,step_index,old_name,new_name,memory_id,reviewed_by)
+  VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11::uuid,$12::uuid)
   RETURNING accepted_at`,
   projectID,sourceFlowID,flowID,failedRunID,input.SuccessfulRunID,input.Revision,
-  targetURL,hint.StepIndex,hint.OriginalName,hint.ProposedName,memoryID).
+  targetURL,hint.StepIndex,hint.OriginalName,hint.ProposedName,memoryID,actor.ID).
   Scan(&accepted.AcceptedAt)
  if err!=nil{fail(w,409,"Repair acceptance conflict");return}
  _,err=tx.Exec(r.Context(),`

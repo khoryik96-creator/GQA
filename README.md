@@ -186,3 +186,9 @@ and has not been merged.
 `docker compose down` / `up`. Running `docker compose down -v` **deletes
 named volumes** and can destroy local projects, accounts and evidence.
 Back up your volumes before resetting the stack.
+
+## Audit and provenance (v0.13)
+New project records, QA plans, confirmed memories, browser flows, test
+executions and reviewed repairs retain the authenticated actor account ID.
+Earlier artifacts may have no recorded creator; they are not backfilled.
+Locator repair revision strings are **user-declared**, not verified build SHAs.

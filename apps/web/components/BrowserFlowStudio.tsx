@@ -284,11 +284,11 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
           {selected.repaired_from_run_id && latestRun.status === "passed" && canReview && <div className="browser-repair-confirm">
             {acceptedReview ? <>
               <strong><CheckCircle2 size={17}/> Verified locator lesson saved</strong>
-              <p>Revision {acceptedReview.app_revision} · Project memory record {acceptedReview.memory_id.slice(0,8)}</p>
+              <p>User-declared revision {acceptedReview.app_revision} · Project memory record {acceptedReview.memory_id.slice(0,8)}</p>
               <p>This lesson is version-scoped and will not silently rewrite other flows.</p>
             </> : <>
               <strong>Record this verified correction</strong>
-              <p>The repaired flow passed against the original failing target. Save it as a project lesson only if this is the expected application behavior.</p>
+              <p>The repaired flow passed against the original failing target. The version is user-declared, not independently verified by GQA. Save it only if this behavior is expected.</p>
               <label>Application version or commit ID
                 <input value={revision} onChange={e=>setRevision(e.target.value)}
                   minLength={3} maxLength={80} placeholder="e.g. staging-commit-a1b2c3"/>
