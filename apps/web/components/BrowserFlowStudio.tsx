@@ -16,6 +16,7 @@ type BrowserFlow = {
   objective: string; steps: BrowserAction[]; digest: string;
   generation_mode: "rules" | "model"; warning: string; created_at: string;
   repaired_from_flow_id?: string; repaired_from_run_id?: string; repair_target?: string;
+  revised_from_flow_id?: string;
 };
 type RepairHint = {
   step_index: number; role: string; original_name: string; proposed_name: string;
@@ -91,12 +92,17 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
   const [drafting, setDrafting] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState("");
+  const [revisions, setRevisions] = useState<BrowserFlow[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [editSteps, setEditSteps] = useState<BrowserAction[]>([]);
+  const [savingRevision, setSavingRevision] = useState(false);
   const visible = useMemo(() => flows.filter(f => f.plan_id === planId), [flows, planId]);
   const selected = visible.find(f => f.id === selectedId) || visible[0];
   const latestRun = runs.find(r => r.flow_id === selected?.id);
   const suggestion = latestRun?.status === "failed" ?
     latestRun.checks.find(check => check.repair)?.repair : undefined;
   const acceptedReview = reviews.find(r => r.repaired_flow_id === selected?.id);
+  const latestRevision = revisions.length === 0 || revisions[revisions.length-1]?.id === selected?.id;
 
   useEffect(() => {
     let cancelled = false;
@@ -111,6 +117,52 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
   }, [projectId, apiBase]);
 
   useEffect(() => { setAcknowledged(false); }, [planId]);
+
+  // Fetch the entire bounded lineage, not just the first 25 flows in history.
+  // Cancel stale responses when switching projects, plans or selected versions.
+  useEffect(() => {
+    setEditing(false); setEditSteps([]); setRevisions([]);
+    if (!selected?.id) return;
+    const requestedFlow = selected.id;
+    let cancelled = false;
+    requestJSON<BrowserFlow[]>(apiBase,"/api/projects/"+projectId+
+      "/flows/"+requestedFlow+"/revisions").then(history => {
+      if (cancelled) return;
+      setRevisions(history);
+      setFlows(previous => {
+        const existing = new Set(previous.map(flow => flow.id));
+        return [...previous, ...history.filter(flow => !existing.has(flow.id))];
+      });
+    }).catch(err => { if (!cancelled) setError((err as Error).message); });
+    return () => { cancelled = true; };
+  }, [apiBase, projectId, selected?.id]);
+
+  function changeAction(index:number,update:Partial<BrowserAction>){
+    setEditSteps(previous=>previous.map((step,i)=>i===index?{...step,...update}:step));
+  }
+  function newAction(op:string):BrowserAction{
+    switch(op){
+      case "navigate":case "assert_url_path":return {op,path:"/"};
+      case "click_role":return {op,role:"button",name:"Show details"};
+      case "assert_visible_role":return {op,role:"heading",name:"Page title"};
+      case "fill_label":return {op,label:"Email",value:"qa-fixture@example.test"};
+      default:return {op:"assert_text",text:"Expected visible text"};
+    }
+  }
+  async function saveEditedRevision(){
+    if (!selected || !canDraft || !latestRevision || selected.repaired_from_run_id || savingRevision) return;
+    setSavingRevision(true);setError("");setAcknowledged(false);
+    try {
+      const created=await requestJSON<BrowserFlow>(apiBase,"/api/projects/"+projectId+
+        "/flows/"+selected.id+"/revisions",{
+        method:"POST",body:JSON.stringify({source_digest:selected.digest,steps:editSteps})
+      });
+      setFlows(previous=>[created,...previous]);
+      setSelectedId(created.id);
+      setEditing(false);
+    }catch(err){setError((err as Error).message)}
+    finally{setSavingRevision(false)}
+  }
 
   async function loadOlderFlows(){
     if(!flowNextCursor||loadingOlderFlows)return;
@@ -237,6 +289,63 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
             Repair lineage: derived from failed run {selected.repaired_from_run_id.slice(0,8)}.
             The original assertions are unchanged and the replay is restricted to the same test target.
           </p>}
+          <div className="browser-version-history">
+            <strong>Immutable version history</strong>
+            <div className="browser-version-list" role="group" aria-label="Saved browser flow versions">
+              {(revisions.length ? revisions : [selected]).map((revision,i) =>
+                <button key={revision.id} type="button" className="button secondary"
+                  aria-pressed={selected.id===revision.id}
+                  onClick={()=>{setSelectedId(revision.id);setEditing(false);setAcknowledged(false);}}>
+                  Version {i+1}{selected.id===revision.id?" · selected":""}
+                </button>)}
+            </div>
+            <p className="fine-print">Versions are immutable. Saving edited steps creates a new digest; past run evidence remains linked to its original version.</p>
+            {canDraft && !selected.repaired_from_run_id &&
+              <button className="button secondary" type="button" disabled={!latestRevision}
+                onClick={()=>{setEditing(true);setEditSteps(selected.steps.map(step=>({...step})));setAcknowledged(false);}}>
+                Edit typed steps as a new version
+              </button>}
+          </div>
+          {editing && <div className="browser-action-editor">
+            <h3>Edit a new reviewed version</h3>
+            <p>Only approved typed operations are allowed; navigation remains relative and at least one assertion is required.</p>
+            {editSteps.map((step,i)=><div className="browser-edit-step" key={i}>
+              <label>Step {i+1} operation
+                <select value={step.op} disabled={i===0} onChange={e=>setEditSteps(previous=>previous.map((current,j)=>j===i?newAction(e.target.value):current))}>
+                  {(["navigate","click_role","fill_label","assert_text","assert_visible_role","assert_url_path"] as const).map(op=>
+                    <option value={op} key={op}>{op.replaceAll("_"," ")}</option>)}
+                </select>
+              </label>
+              {(step.op==="navigate"||step.op==="assert_url_path") &&
+                <label>Relative path<input value={step.path||""} maxLength={160} onChange={e=>changeAction(i,{path:e.target.value})}/></label>}
+              {(step.op==="click_role"||step.op==="assert_visible_role") && <>
+                <label>Accessible role<select value={step.role||"button"} onChange={e=>changeAction(i,{role:e.target.value})}>
+                  {(step.op==="click_role"?["button","link"]:["button","link","heading","textbox"]).map(role=><option key={role} value={role}>{role}</option>)}
+                </select></label>
+                <label>Accessible name<input value={step.name||""} maxLength={120} onChange={e=>changeAction(i,{name:e.target.value})}/></label>
+              </>}
+              {step.op==="fill_label" && <>
+                <label>Form label<input value={step.label||""} maxLength={100} onChange={e=>changeAction(i,{label:e.target.value})}/></label>
+                <label>Non-secret fixture input<input value={step.value||""} maxLength={200} onChange={e=>changeAction(i,{value:e.target.value})}/></label>
+              </>}
+              {step.op==="assert_text" &&
+                <label>Expected visible text<input value={step.text||""} maxLength={200} onChange={e=>changeAction(i,{text:e.target.value})}/></label>}
+              <div className="browser-edit-actions">
+                <button className="button secondary" type="button" disabled={i===0||editSteps.length<=2}
+                  onClick={()=>setEditSteps(previous=>previous.filter((_,j)=>j!==i))}>Remove step {i+1}</button>
+                <button className="button secondary" type="button" disabled={i<2}
+                  onClick={()=>setEditSteps(previous=>{const next=[...previous];[next[i-1],next[i]]=[next[i],next[i-1]];return next;})}>Move up</button>
+              </div>
+            </div>)}
+            <div className="browser-edit-actions">
+              <button className="button secondary" type="button" disabled={editSteps.length>=8}
+                onClick={()=>setEditSteps(previous=>[...previous,newAction("assert_text")])}>Add assertion step</button>
+              <button className="button secondary" type="button" onClick={()=>setEditing(false)}>Discard edits</button>
+              <button className="button primary" type="button" disabled={savingRevision} onClick={saveEditedRevision}>
+                {savingRevision?"Saving...":"Save new version for review"}
+              </button>
+            </div>
+          </div>}
           <ol className="typed-actions">
             {selected.steps.map((step,i) => <li key={i}>
               <span>{String(i+1).padStart(2,"0")}</span>
