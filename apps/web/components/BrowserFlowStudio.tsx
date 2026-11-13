@@ -34,7 +34,7 @@ type RunEvidence = {
 };
 type TestRun = {
   id: string; flow_id?: string; status: string; checks: SmokeCheck[];
-  screenshot_available: boolean; started_at: string; execution_kind: string;
+  screenshot_available: boolean; started_at: string; execution_kind?: string;
   evidence?: RunEvidence;
 };
 type Props = {
@@ -45,6 +45,8 @@ type Props = {
   canReview: boolean;
   hasWeb: boolean;
   apiBase: string;
+  runs: TestRun[];
+  onRunRecorded: (run: TestRun) => void;
 };
 
 function describeAction(a: BrowserAction) {
@@ -72,11 +74,10 @@ async function requestJSON<T>(api: string, path: string, init?: RequestInit): Pr
   return resp.json() as Promise<T>;
 }
 
-export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft, canReview, hasWeb, apiBase }: Props) {
+export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft, canReview, hasWeb, apiBase, runs, onRunRecorded }: Props) {
   const [prompt, setPrompt] = useState("Open the homepage, click Show details and verify the detail panel is visible.");
   const [target, setTarget] = useState("http://fixture:8081");
   const [flows, setFlows] = useState<BrowserFlow[]>([]);
-  const [runs, setRuns] = useState<TestRun[]>([]);
   const [reviews, setReviews] = useState<RepairReview[]>([]);
   const [repairing, setRepairing] = useState(false);
   const [accepting, setAccepting] = useState(false);
@@ -95,13 +96,12 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
 
   useEffect(() => {
     let cancelled = false;
-    setFlows([]); setRuns([]); setReviews([]); setSelectedId(""); setAcknowledged(false); setError("");
+    setFlows([]); setReviews([]); setSelectedId(""); setAcknowledged(false); setError("");
     Promise.all([
       requestJSON<BrowserFlow[]>(apiBase, "/api/projects/" + projectId + "/flows"),
-      requestJSON<TestRun[]>(apiBase, "/api/projects/" + projectId + "/runs"),
       requestJSON<RepairReview[]>(apiBase, "/api/projects/" + projectId + "/repairs")
-    ]).then(([newFlows, newRuns, newReviews]) => {
-      if (!cancelled) { setFlows(newFlows); setRuns(newRuns); setReviews(newReviews); }
+    ]).then(([newFlows, newReviews]) => {
+      if (!cancelled) { setFlows(newFlows); setReviews(newReviews); }
     }).catch(err => { if (!cancelled) setError(err.message); });
     return () => { cancelled = true; };
   }, [projectId, apiBase]);
@@ -132,7 +132,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
           body: JSON.stringify({ target_url: target, acknowledged_digest: selected.digest })
         }
       );
-      setRuns(existing => [run, ...existing]);
+      onRunRecorded(run);
       setAcknowledged(false);
     } catch (err) { setError((err as Error).message); }
     finally { setExecuting(false); }
