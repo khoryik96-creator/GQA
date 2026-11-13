@@ -10,8 +10,10 @@ function syncDirectory(dir){
 }
 function validPersistedResult(result,id){
  return !!result && typeof result==="object" && !Array.isArray(result) &&
+  Object.keys(result).sort().join(",")==="checks,evidence,screenshot_base64" &&
   Array.isArray(result.checks) && result.checks.length>=1 && result.checks.length<=20 &&
   result.checks.every(c=>c && typeof c==="object" &&
+   Object.keys(c).sort().join(",")==="detail,duration_ms,name,status" &&
    typeof c.name==="string" && c.name.length<=120 &&
    typeof c.detail==="string" && c.detail.length<=400 &&
    ["passed","failed"].includes(c.status) &&
@@ -20,6 +22,7 @@ function validPersistedResult(result,id){
   result.screenshot_base64.length<=1400000 &&
   /^[a-zA-Z0-9+/=]*$/.test(result.screenshot_base64) &&
   !!result.evidence && typeof result.evidence==="object" &&
+  Object.keys(result.evidence).sort().join(",")==="failure_kind,job_id,worker_lifecycle" &&
   result.evidence.job_id===id &&
   result.evidence.worker_lifecycle==="ephemeral_container" &&
   typeof result.evidence.failure_kind==="string" &&
