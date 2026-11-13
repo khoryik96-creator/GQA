@@ -127,6 +127,13 @@ jobs:
           assert len(broker_jobs)>=2, broker_jobs
           assert all(j["status"]=="passed" for j in broker_jobs), broker_jobs
           assert all("spec" not in j and "target_url" not in j for j in broker_jobs)
+          assert all(j.get("result_available") for j in broker_jobs),broker_jobs
+          job_id=broker_jobs[0]["id"]
+          with urllib.request.urlopen(BASE+"/api/admin/broker-jobs/"+job_id+"/result") as response:
+              evidence=json.load(response)
+          assert evidence["checks"] and evidence["checks"][0]["status"]=="passed",evidence
+          assert "screenshot_base64" in evidence
+          assert "spec" not in evidence and "target_url" not in evidence
           print("PASS: separate disposable containers, persisted evidence and admin job monitoring")
           PY
       - name: Verify durable asynchronous queue and restart recovery
@@ -166,6 +173,10 @@ jobs:
               raise AssertionError("Asynchronous job never reached terminal status")
           assert tracked["status"]=="passed",tracked
           assert tracked["check_count"]>=1,tracked
+          assert tracked.get("result_available"),tracked
+          _,stored=call("/jobs/"+queued["id"]+"/result")
+          assert stored["checks"][0]["status"]=="passed",stored
+          assert all("secret" not in json.dumps(check) for check in stored["checks"])
 
           assert os.path.isfile(".gqa-broker-state/jobs.json")
           with open(".gqa-broker-state/jobs.json",encoding="utf-8") as f:
@@ -201,7 +212,15 @@ jobs:
           with urllib.request.urlopen(req,timeout=5) as response:
               statuses=json.load(response)
           assert any(job["status"]=="passed" for job in statuses),statuses
-          print("PASS: persisted broker jobs restored after full process restart")
+          persisted=next(job for job in statuses
+              if job["status"]=="passed" and job.get("result_available"))
+          req=urllib.request.Request(
+              "http://127.0.0.1:18090/jobs/"+persisted["id"]+"/result",
+              headers={"X-GQA-Runner-Token":token})
+          with urllib.request.urlopen(req,timeout=5) as response:
+              evidence=json.load(response)
+          assert evidence["checks"] and evidence["checks"][0]["status"]=="passed",evidence
+          print("PASS: durable QA checks and outcomes restored after broker restart")
           PY
       - name: Confirm no disposable job containers remain
         run: |
