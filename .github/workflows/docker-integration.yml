@@ -17,6 +17,7 @@ jobs:
           printf 'GQA_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" > .env
           printf 'GQA_RUNNER_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
           printf 'GQA_DB_APP_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> .env
+          printf 'GQA_DB_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> .env
       - name: Build and start local stack
         run: docker compose up --build -d
 
