@@ -21,7 +21,8 @@ func reconcileOrphanedRuns(ctx context.Context,db *pgxpool.Pool)error{
    evidence='{"failure_kind":"runner_interrupted","worker_lifecycle":"unverified","console_errors":0,"page_exceptions":0,"failed_requests":0,"http_5xx":0}'::jsonb,
    screenshot_available=false
   WHERE status='running'`)
- return err
+ if err!=nil{return err}
+ return interruptCodeReviews(ctx,db,"0 seconds")
 }
 // Browser requests can disappear while a worker is running. Startup recovery
 // handles process restarts; this periodic sweep also covers a live process
@@ -61,6 +62,7 @@ func maintainLocalMetadata(ctx context.Context,db *pgxpool.Pool){
   case <-staleTicker.C:
    op,done:=context.WithTimeout(ctx,10*time.Second)
    _=reconcileExpiredRunningRuns(op,db)
+   _=interruptCodeReviews(op,db,"20 minutes")
    done()
   case <-cleanupTicker.C:
    op,done:=context.WithTimeout(ctx,10*time.Second)
