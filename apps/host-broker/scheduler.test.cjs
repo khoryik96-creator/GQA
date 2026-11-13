@@ -180,3 +180,20 @@ test("stale journal lease can only be reclaimed after owning process dies",t=>{
  assert.equal(store.leaseToken.length,32);
  store.releaseLease();
 });
+
+test("asynchronous jobs keep sanitized result evidence after completion",async t=>{
+ const dir=temp(t);
+ const scheduler=new Scheduler({store:new JobStore(dir),cleanup:async()=>{},
+  runJob:async()=>({...success,secret:"not stored"})});
+ await scheduler.start();
+ const job=scheduler.enqueue(spec);
+ await tick();await tick();await tick();
+ assert.equal(scheduler.get(job.id).status,"passed");
+ assert.equal(scheduler.get(job.id).result_available,true);
+ const result=scheduler.getResult(job.id);
+ assert.equal(result.checks[0].status,"passed");
+ assert.equal(JSON.stringify(result).includes("not stored"),false);
+ const restored=new Scheduler({store:new JobStore(dir),cleanup:async()=>{}});
+ await restored.start();
+ assert.equal(restored.getResult(job.id).checks[0].status,"passed");
+});
