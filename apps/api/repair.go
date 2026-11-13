@@ -184,11 +184,12 @@ func (s *server) confirmRepair(w http.ResponseWriter,r *http.Request){
  if !errors.Is(err,pgx.ErrNoRows){fail(w,500,"Unable to check repair acceptance");return}
  note:=fmt.Sprintf("Validated UI locator correction for user-declared revision %s at authorized target %s: in browser step %d, the %s accessible name changed from %q to %q. Original test assertions passed after a separately reviewed replay. This is a version-scoped testing lesson, not a change to product requirements.",
   input.Revision,targetURL,hint.StepIndex+1,hint.Role,hint.OriginalName,hint.ProposedName)
+ approver,_:=currentAccount(r)
  var memoryID string
  err=tx.QueryRow(r.Context(),`
-  INSERT INTO memories(project_id,kind,content,source,status)
-  VALUES($1::uuid,'lesson',$2,'verified_qa_repair','confirmed') RETURNING id::text`,
-  projectID,note).Scan(&memoryID)
+  INSERT INTO memories(project_id,kind,content,source,status,created_by)
+  VALUES($1::uuid,'lesson',$2,'verified_qa_repair','confirmed',$3::uuid) RETURNING id::text`,
+  projectID,note,approver.ID).Scan(&memoryID)
  if err!=nil{fail(w,500,"Unable to record repair lesson");return}
  var accepted RepairReview
  accepted=RepairReview{
@@ -196,7 +197,6 @@ func (s *server) confirmRepair(w http.ResponseWriter,r *http.Request){
   TargetURL:targetURL,OldName:hint.OriginalName,NewName:hint.ProposedName,
   AppRevision:input.Revision,RevisionProvenance:"user_declared",MemoryID:memoryID,
  }
- approver,_:=currentAccount(r)
  err=tx.QueryRow(r.Context(),`
   INSERT INTO repair_acceptances(
    project_id,original_flow_id,repaired_flow_id,original_failure_run_id,verified_run_id,
