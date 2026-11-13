@@ -60,3 +60,33 @@ test("symlink result directory is rejected on write",t=>{
  const store=new ResultStore(dir);
  assert.throws(()=>store.save(id,{checks:[{name:"check"}]}),/Unsafe result directory/);
 });
+
+test("corrupt or tampered persisted evidence is never returned as trustworthy",t=>{
+ const dir=temp(t),store=new ResultStore(dir);
+ store.save(id,{checks:[{name:"Verified",status:"passed",detail:"OK",duration_ms:1}]});
+ const file=store.file(id);
+ fs.writeFileSync(file,"{bad-json");
+ assert.throws(()=>store.get(id),/Stored job evidence is invalid/);
+ fs.writeFileSync(file,JSON.stringify({checks:[{name:"Tampered",status:"passed",
+   detail:"not verified",duration_ms:1}],screenshot_base64:"",
+   evidence:{job_id:"another-job",worker_lifecycle:"ephemeral_container",failure_kind:"none"}}));
+ assert.throws(()=>store.get(id),/Stored job evidence is invalid/);
+ fs.writeFileSync(file,JSON.stringify({checks:[{name:"Safe",status:"passed",detail:"OK",duration_ms:1}],
+   screenshot_base64:"",evidence:{job_id:id,worker_lifecycle:"ephemeral_container",failure_kind:"none"},
+   raw_logs:"secret payload that must never be served"}));
+ assert.throws(()=>store.get(id),/Stored job evidence is invalid/);
+ store.discard(id);
+ assert.equal(store.get(id),null);
+ const empty=path.join(dir,"results","unrelated.txt");
+ fs.writeFileSync(empty,"should survive");
+ store.prune(new Set());
+ assert.equal(fs.readFileSync(empty,"utf8"),"should survive");
+});
+test("unsafe result symlink cannot be accepted as saved evidence",t=>{
+ if(process.platform==="win32")return;
+ const dir=temp(t),outside=temp(t),store=new ResultStore(dir);
+ fs.mkdirSync(path.dirname(store.file(id)),{recursive:true});
+ fs.symlinkSync(path.join(outside,"secret.txt"),store.file(id));
+ assert.throws(()=>store.get(id),/Stored job evidence is invalid|ENOENT/);
+ assert.throws(()=>store.discard(id),/Unsafe broker result file/);
+});

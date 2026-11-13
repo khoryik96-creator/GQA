@@ -211,3 +211,61 @@ test("journal disk failure cannot leave phantom in-memory jobs",t=>{
  assert.throws(()=>store.transition(job.id,{status:"passed"}),/disk unavailable/);
  assert.equal(store.get(job.id).status,"queued");
 });
+
+test("journal failure after successful worker result stops scheduling and revokes stale success",async t=>{
+ const dir=temp(t),store=new JobStore(dir);
+ let finish,runCount=0;
+ const scheduler=new Scheduler({store,cleanup:async()=>{},
+   runJob:()=>{runCount++;return new Promise(resolve=>{finish=resolve})}});
+ await scheduler.start();
+ const launched=scheduler.submitSync(spec);
+ const queued=scheduler.enqueue(spec);
+ await tick();
+ assert.equal(runCount,1);
+ const saved=store.save.bind(store);
+ store.save=()=>{throw Error("simulated journal disk failure")};
+ finish(success);
+ const response=await launched.done;
+ assert.equal(response.evidence.failure_kind,"job_persistence_failed");
+ assert.equal(response.checks[0].status,"failed");
+ assert.equal(scheduler.ready,false);
+ assert.throws(()=>scheduler.enqueue(spec),/recovery incomplete/);
+ await tick();
+ assert.equal(runCount,1,"Queued worker started despite persistence failure");
+ store.save=saved;
+
+ const removed=[];
+ const recovered=new Scheduler({store:new JobStore(dir),
+   cleanup:async id=>removed.push(id),runJob:async()=>success});
+ await recovered.start();
+ await tick();await tick();
+ assert.deepEqual(removed,[launched.job.id]);
+ assert.equal(recovered.get(launched.job.id).status,"interrupted");
+ const result=recovered.getResult(launched.job.id);
+ assert.equal(result.checks[0].status,"failed",
+   "Stale successful worker evidence escaped broker recovery");
+ assert.equal(result.evidence.failure_kind,"broker_restart");
+ assert.equal(recovered.get(queued.id).status,"passed",
+   "Accepted queued job must only resume after reconciliation");
+});
+
+test("result disk failure settles caller but does not launch the next job",async t=>{
+ const dir=temp(t);
+ let finish,runCount=0;
+ const scheduler=new Scheduler({store:new JobStore(dir),cleanup:async()=>{},
+   runJob:()=>{runCount++;return new Promise(resolve=>{finish=resolve})}});
+ await scheduler.start();
+ const submitted=scheduler.submitSync(spec);
+ const queued=scheduler.enqueue(spec);
+ await tick();
+ const original=scheduler.results.save.bind(scheduler.results);
+ scheduler.results.save=()=>{throw Error("simulated result disk failure")};
+ finish(success);
+ const response=await submitted.done;
+ assert.equal(response.evidence.failure_kind,"job_persistence_failed");
+ assert.equal(scheduler.ready,false);
+ await tick();
+ assert.equal(runCount,1);
+ assert.equal(scheduler.get(queued.id).status,"queued");
+ scheduler.results.save=original;
+});

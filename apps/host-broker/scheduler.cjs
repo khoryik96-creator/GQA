@@ -19,8 +19,13 @@ class Scheduler {
     for(const job of this.store.recoverable()){
       this.store.transition(job.id,{status:"recovery_pending",failure_kind:"broker_restart"});
       await this.cleanup(job.id);
+      // A worker may have durably written a successful result just before
+      // the broker died without durably committing its terminal job state.
+      // Never serve that stale success as evidence for an interrupted job.
+      this.results.discard(job.id);
+      this.results.save(job.id,failure("broker_restart",job.id));
       this.store.transition(job.id,{status:"interrupted",finished_at:new Date().toISOString(),
-        failure_kind:"broker_restart"});
+        failure_kind:"broker_restart",check_count:1});
     }
     this.ready=true;
     this.pump();
@@ -76,55 +81,82 @@ class Scheduler {
     this.waiters.delete(id);
     if(cb)cb(result);
   }
+  // Disk failures must never be reinterpreted as application failures or
+  // permit the next queued execution to launch. On restart the persisted
+  // running/recovery_pending job is reconciled before accepting new work.
+  persistenceFailure(id){
+    this.ready=false;
+    const unavailable=failure("job_persistence_failed",id);
+    try{
+      this.store.transition(id,{status:"recovery_pending",
+        failure_kind:"job_persistence_failed",check_count:1});
+    }catch{
+      // Storage may still be unavailable. Keep the last durable running
+      // status for startup reconciliation; do not hide the failed write.
+    }
+    this.settle(id,unavailable);
+  }
   pump(){
     if(!this.ready||this.current)return;
     const next=this.store.queued();
     if(!next)return;
     const controller=new AbortController();
     this.current={id:next.id,controller};
-    this.store.transition(next.id,{status:"running",started_at:new Date().toISOString()});
+    try{
+      // Persist running state before any Docker process can launch.
+      this.store.transition(next.id,{status:"running",started_at:new Date().toISOString()});
+    }catch{
+      this.ready=false;
+      this.current=null;
+      throw Object.assign(new Error("Broker journal cannot persist job start"),{status:503});
+    }
     Promise.resolve().then(()=>this.runJob(next.spec,{
       project:this.project,signal:controller.signal,id:next.id,
       timeoutMs:next.kind==="smoke"?24000:55000
     })).then(result=>{
-      const cleanupFailed=result?.evidence?.failure_kind==="worker_cleanup_failed";
-      if(cleanupFailed){
-        // The container could still exist. Block new tests until a later
-        // restart reconciles the exact orphan identity.
-        this.ready=false;
-        this.store.transition(next.id,{status:"recovery_pending",
-          failure_kind:"worker_cleanup_failed",check_count:1});
-        this.settle(next.id,result);
-        return;
+      try{
+        if(result?.evidence?.failure_kind==="worker_cleanup_failed"){
+          this.ready=false;
+          this.store.transition(next.id,{status:"recovery_pending",
+            failure_kind:"worker_cleanup_failed",check_count:1});
+          this.settle(next.id,result);
+          return;
+        }
+        const cancelled=controller.signal.aborted;
+        const final=cancelled?failure("worker_cancelled",next.id):result;
+        // Persist evidence BEFORE marking the job terminal. A broker restart
+        // between those two writes is handled by discarding the stale result.
+        this.results.save(next.id,final);
+        const anyFailed=final.checks?.some(c=>c.status!=="passed")!==false;
+        this.store.transition(next.id,{
+          status:cancelled?"cancelled":anyFailed?"failed":"passed",
+          finished_at:new Date().toISOString(),
+          failure_kind:final.evidence?.failure_kind||"",
+          check_count:final.checks?.length||0
+        });
+        try{this.results.prune(new Set(this.store.jobs.map(j=>j.id)))}
+        catch{this.ready=false}
+        this.settle(next.id,final);
+      }catch{
+        this.persistenceFailure(next.id);
       }
-      const cancelled=controller.signal.aborted;
-      const final=cancelled?failure("worker_cancelled",next.id):result;
-      try{this.results.save(next.id,final)}
-      catch{
-        this.ready=false;
-        const err=failure("evidence_persistence_failed",next.id);
-        this.store.transition(next.id,{status:"failed",finished_at:new Date().toISOString(),
-          failure_kind:"evidence_persistence_failed",check_count:1});
-        this.settle(next.id,err);
-        return;
-      }
-      const anyFailed=final.checks?.some(c=>c.status!=="passed")!==false;
-      this.store.transition(next.id,{status:cancelled?"cancelled":anyFailed?"failed":"passed",
-        finished_at:new Date().toISOString(),
-        failure_kind:final.evidence?.failure_kind||"",
-        check_count:final.checks?.length||0});
-      this.results.prune(new Set(this.store.jobs.map(j=>j.id)));
-      this.settle(next.id,final);
     }).catch(()=>{
       const final=failure(controller.signal.aborted?"worker_cancelled":"worker_error",next.id);
-      try{this.results.save(next.id,final)}catch{this.ready=false}
-      this.store.transition(next.id,{status:controller.signal.aborted?"cancelled":"failed",
-        finished_at:new Date().toISOString(),failure_kind:final.evidence.failure_kind,
-        check_count:1});
-      this.settle(next.id,final);
+      try{
+        this.results.save(next.id,final);
+        this.store.transition(next.id,{
+          status:controller.signal.aborted?"cancelled":"failed",
+          finished_at:new Date().toISOString(),
+          failure_kind:final.evidence.failure_kind,check_count:1
+        });
+        this.settle(next.id,final);
+      }catch{
+        this.persistenceFailure(next.id);
+      }
     }).finally(()=>{
       this.current=null;
-      this.pump();
+      // A journal/evidence failure disables the queue until reconciliation.
+      if(this.ready)this.pump();
     });
   }
 }
