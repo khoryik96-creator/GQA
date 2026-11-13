@@ -269,3 +269,62 @@ test("result disk failure settles caller but does not launch the next job",async
  assert.equal(scheduler.get(queued.id).status,"queued");
  scheduler.results.save=original;
 });
+
+test("retry with the same async idempotency key returns the same durable job even at capacity",async t=>{
+ const dir=temp(t),key="ab124567-890a-4bcd-8ef0-1234567890ab";
+ let finish,launches=0;
+ const scheduler=new Scheduler({store:new JobStore(dir),capacity:1,cleanup:async()=>{},
+   runJob:()=>{launches++;return new Promise(resolve=>{finish=resolve;});}});
+ await scheduler.start();
+ const first=scheduler.enqueue(spec,key);
+ assert.equal(first.status,"running");
+ const duplicate=scheduler.enqueue({...spec},key);
+ assert.equal(duplicate.id,first.id);
+ assert.equal(scheduler.store.jobs.length,1);
+ assert.throws(()=>scheduler.enqueue({...spec,run_api:false},key),err=>err.status===409);
+ assert.throws(()=>scheduler.enqueue(spec,"bad-key"),err=>err.status===400);
+ assert.throws(()=>scheduler.enqueue(spec,"de445678-90ab-4cde-8f01-234567890abc"),
+   err=>err.status===429);
+ await tick();
+ assert.equal(launches,1);
+ finish(success);await tick();await tick();
+ const persisted=new JobStore(dir);persisted.load();
+ assert.equal(persisted.findIdempotent(spec,key)?.id,first.id);
+ const recovered=new Scheduler({store:persisted,cleanup:async()=>{},
+   runJob:async()=>{launches++;return success;}});
+ await recovered.start();
+ assert.equal(recovered.enqueue(spec,key).id,first.id);
+ assert.equal(launches,1,"A completed idempotent job was executed twice");
+ assert.equal(Object.hasOwn(recovered.get(first.id),"idempotency_hash"),false);
+});
+
+test("ambiguous acceptance after durable rename fails closed until journal recovery",async t=>{
+ const dir=temp(t),key="cd345678-90ab-4cde-8f01-234567890abc";
+ const store=new JobStore(dir);
+ const scheduler=new Scheduler({store,cleanup:async()=>{},runJob:async()=>success});
+ await scheduler.start();
+ const original=store.save.bind(store);
+ store.save=()=>{original();throw Error("simulated crash after durable journal rename");};
+ assert.throws(()=>scheduler.enqueue(spec,key),err=>err.status===503);
+ assert.equal(scheduler.ready,false,"Acceptance error must disable all new work");
+ assert.throws(()=>scheduler.enqueue(spec,key),err=>err.status===503);
+ const persisted=new JobStore(dir);persisted.load();
+ const previous=persisted.findIdempotent(spec,key);
+ assert.ok(previous,"Committed journal entry must be recoverable by the same key");
+ assert.equal(previous.status,"queued");
+ const recovered=new Scheduler({store:persisted,cleanup:async()=>{},runJob:async()=>success});
+ await recovered.start();await tick();await tick();
+ assert.equal(recovered.enqueue(spec,key).id,previous.id);
+ assert.equal(recovered.store.jobs.filter(j=>j.idempotency_hash).length,1);
+});
+
+test("stored jobs with malformed idempotency digests fail journal validation",t=>{
+ const dir=temp(t),store=new JobStore(dir),key="ef567890-abcd-4ef0-9123-4567890abcde";
+ store.load();store.create(spec,key);
+ const file=path.join(dir,"jobs.json");
+ const data=JSON.parse(fs.readFileSync(file,"utf8"));
+ data[0].idempotency_hash="sensitive-or-invalid";
+ fs.writeFileSync(file,JSON.stringify(data));
+ assert.throws(()=>new JobStore(dir).load(),/Invalid broker journal/);
+});
+
