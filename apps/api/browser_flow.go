@@ -192,7 +192,7 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
   for _,agent:=range agents{if agent.ID=="web"{hasWeb=true;break}}
   if !hasWeb{fail(w,403,"Web QA agent not selected for this plan");return}
 
-  actor,_=currentAccount(r)
+  actor,_:=currentAccount(r)
   run:=TestRun{ProjectID:projectID,PlanID:flow.PlanID,TargetURL:input.TargetURL,
     FlowID:flowID,ExecutionKind:"browser_flow",Status:"running"}
   err=s.db.QueryRow(r.Context(),`
