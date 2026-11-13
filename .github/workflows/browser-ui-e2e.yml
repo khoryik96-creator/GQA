@@ -41,6 +41,7 @@ jobs:
           node tests/ui_e2e.mjs
           node tests/advanced_ui_e2e.mjs
           node tests/repair_review_ui_e2e.mjs
+          node tests/typed_flow_revision_e2e.mjs
           node tests/wcag_axe_audit.mjs
       - name: Upload WCAG screening report
         if: always()
