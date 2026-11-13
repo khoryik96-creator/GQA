@@ -71,6 +71,10 @@ test("corrupt or tampered persisted evidence is never returned as trustworthy",t
    detail:"not verified",duration_ms:1}],screenshot_base64:"",
    evidence:{job_id:"another-job",worker_lifecycle:"ephemeral_container",failure_kind:"none"}}));
  assert.throws(()=>store.get(id),/Stored job evidence is invalid/);
+ fs.writeFileSync(file,JSON.stringify({checks:[{name:"Safe",status:"passed",detail:"OK",duration_ms:1}],
+   screenshot_base64:"",evidence:{job_id:id,worker_lifecycle:"ephemeral_container",failure_kind:"none"},
+   raw_logs:"secret payload that must never be served"}));
+ assert.throws(()=>store.get(id),/Stored job evidence is invalid/);
  store.discard(id);
  assert.equal(store.get(id),null);
  const empty=path.join(dir,"results","unrelated.txt");
