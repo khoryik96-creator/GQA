@@ -23,7 +23,7 @@ check(/GQA_RUNNER_TOKEN:\s*\$\{GQA_RUNNER_TOKEN:\?/.test(compose),
 check(/GQA_DB_APP_PASSWORD:\s*\$\{GQA_DB_APP_PASSWORD:\?/.test(compose) &&
   /gqa_app:/.test(compose) && /service_completed_successfully/.test(compose),
  "app DB uses a secret non-superuser role and migration gate");
-check(/GQA_DB_ADMIN_PASSWORD:\s*\$\{GQA_DB_ADMIN_PASSWORD:\?/.test(compose) &&
+check(/POSTGRES_PASSWORD:\s*\$\{GQA_DB_ADMIN_PASSWORD:\?/.test(compose) &&
  !compose.includes("gqa_local_only"),"superuser password is no longer fixed in Compose");
 check(/127\.0\.0\.1:8080:8080/.test(compose) &&
       /127\.0\.0\.1:3000:3000/.test(compose),
