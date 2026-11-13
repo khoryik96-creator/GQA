@@ -85,29 +85,27 @@ func TestConcurrentAccountRateLimitIsAtomic(t *testing.T){
 
 func TestLoginThrottleMapBoundedUnderUniqueAccountChurn(t *testing.T){
  auth,_:=newAuthenticator(nil,"at-least-sixteen-character-password","http://localhost:3000",false)
- // Simulate a shared network with many invalid account names. The account
- // bucket is deliberately distinct from the shared IP bucket.
- ip:="127.0.0.1"
- for i:=0;i<maxIPLoginAttempts;i++{
-  if !auth.reserveLoginAttempt(ip,fmt.Sprintf("user-%d@example.test",i)){
-   t.Fatalf("unexpected rejection at %d",i)
+ // Each new IP and account uses two buckets, until the memory cap.
+ for i:=0;i<maxLoginThrottleBuckets/2;i++{
+  if !auth.reserveLoginAttempt(fmt.Sprintf("ip-%d",i),fmt.Sprintf("user-%d@example.test",i)){
+   t.Fatalf("unexpected rejection before capacity at %d",i)
   }
  }
- if auth.reserveLoginAttempt(ip,"another@example.test"){
-  t.Fatal("IP budget was bypassed")
+ if len(auth.failures)!=maxLoginThrottleBuckets{
+  t.Fatalf("expected %d buckets, got %d",maxLoginThrottleBuckets,len(auth.failures))
  }
- // Fill nearly all slots with active records from many IPs; no eviction of
- // active limits may occur, even if the account names differ.
- for i:=0;i<maxLoginThrottleBuckets;i++{
-  auth.failures[fmt.Sprintf("account:synthetic-%d",i)]=[]time.Time{time.Now()}
- }
- before:=len(auth.failures)
- if auth.reserveLoginAttempt("other.example","unseen@example.test"){
+ if auth.reserveLoginAttempt("unseen-ip","unseen@example.test"){
   t.Fatal("accepted new login when throttle memory exhausted")
  }
- if len(auth.failures)!=before{t.Fatal("throttle memory grew past capacity")}
+ if len(auth.failures)!=maxLoginThrottleBuckets{t.Fatal("throttle memory grew past capacity")}
+ // Saturation must not evict existing active limits. Known account and IP
+ // can still consume their own independent, pre-existing buckets.
+ ip:="ip-0"
+ for i:=1;i<maxLoginFailures;i++{
+  if !auth.reserveLoginAttempt(ip,"user-0@example.test"){t.Fatal("known account blocked prematurely")}
+ }
  if auth.reserveLoginAttempt(ip,"user-0@example.test"){
-  t.Fatal("active shared-IP limit was reset by memory pressure")
+  t.Fatal("account limit bypassed under capacity pressure")
  }
 }
 func TestLoginThrottleReclaimsExpiredKeys(t *testing.T){
