@@ -10,6 +10,7 @@ type BrowserAction = {
   op: string; path?: string; role?: string; name?: string;
   label?: string; value?: string; text?: string;
 };
+type FlowPage = { items: BrowserFlow[]; next_cursor: string };
 type BrowserFlow = {
   id: string; project_id: string; plan_id: string; prompt: string;
   objective: string; steps: BrowserAction[]; digest: string;
@@ -79,6 +80,8 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
   const [prompt, setPrompt] = useState("Open the homepage, click Show details and verify the detail panel is visible.");
   const [target, setTarget] = useState("http://fixture:8081");
   const [flows, setFlows] = useState<BrowserFlow[]>([]);
+  const [flowNextCursor, setFlowNextCursor] = useState("");
+  const [loadingOlderFlows, setLoadingOlderFlows] = useState(false);
   const [reviews, setReviews] = useState<RepairReview[]>([]);
   const [repairing, setRepairing] = useState(false);
   const [accepting, setAccepting] = useState(false);
@@ -97,17 +100,33 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
 
   useEffect(() => {
     let cancelled = false;
-    setFlows([]); setReviews([]); setSelectedId(""); setAcknowledged(false); setError("");
+    setFlows([]); setReviews([]); setFlowNextCursor("");setSelectedId(""); setAcknowledged(false); setError("");
     Promise.all([
-      requestJSON<BrowserFlow[]>(apiBase, "/api/projects/" + projectId + "/flows"),
+      requestJSON<FlowPage>(apiBase, "/api/projects/" + projectId + "/flows?limit=25"),
       requestJSON<RepairReview[]>(apiBase, "/api/projects/" + projectId + "/repairs")
     ]).then(([newFlows, newReviews]) => {
-      if (!cancelled) { setFlows(newFlows); setReviews(newReviews); }
+      if (!cancelled) { setFlows(newFlows.items);setFlowNextCursor(newFlows.next_cursor); setReviews(newReviews); }
     }).catch(err => { if (!cancelled) setError(err.message); });
     return () => { cancelled = true; };
   }, [projectId, apiBase]);
 
   useEffect(() => { setAcknowledged(false); }, [planId]);
+
+  async function loadOlderFlows(){
+    if(!flowNextCursor||loadingOlderFlows)return;
+    const requestedProject=projectId;
+    setLoadingOlderFlows(true);setError("");
+    try{
+      const page=await requestJSON<FlowPage>(apiBase,"/api/projects/"+requestedProject+
+        "/flows?limit=25&cursor="+encodeURIComponent(flowNextCursor));
+      setFlows(previous=>{
+        const ids=new Set(previous.map(f=>f.id));
+        return [...previous,...page.items.filter(f=>!ids.has(f.id))];
+      });
+      setFlowNextCursor(page.next_cursor);
+    }catch(err){setError((err as Error).message)}
+    finally{setLoadingOlderFlows(false)}
+  }
 
   async function draftFlow(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -198,6 +217,8 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
       </form>
 
       {error && <div className="browser-flow-error"><AlertTriangle size={16}/>{error}</div>}
+      {flowNextCursor&&<button className="button secondary" type="button" disabled={loadingOlderFlows}
+        onClick={loadOlderFlows}>{loadingOlderFlows?"Loading older flows…":"Load older browser flows"}</button>}
       {visible.length>0 && <div className="browser-flow-review">
         {visible.length > 1 && <label>Saved flows for current plan
           <select value={selected?.id || ""} onChange={e => {setSelectedId(e.target.value); setAcknowledged(false);}}>

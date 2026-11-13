@@ -69,10 +69,22 @@ func allowedSmokeTarget(target string,configured string)bool{
 func (s *server) runs(w http.ResponseWriter,r *http.Request){
   id,ok:=validProjectID(w,r);if !ok{return}
   if r.Method==http.MethodGet {
-    rows,err:=s.db.Query(r.Context(),`
+    limit,cursor,paged,pageErr:=parseHistoryPageRequest(r)
+    if pageErr!=nil{fail(w,400,pageErr.Error());return}
+    const selectRuns=`
       SELECT id::text,project_id::text,plan_id::text,target_url,status,checks,started_at,finished_at,
       screenshot_available,COALESCE(flow_id::text,''),execution_kind,evidence
-      FROM test_runs WHERE project_id=$1::uuid ORDER BY started_at DESC LIMIT 30`,id)
+      FROM test_runs WHERE project_id=$1::uuid`
+    var rows pgx.Rows
+    var err error
+    if paged{
+      rows,err=s.db.Query(r.Context(),selectRuns+
+        " AND ($2::timestamptz IS NULL OR (started_at,id)<($2::timestamptz,$3::uuid)) ORDER BY started_at DESC,id DESC LIMIT $4",
+        id,historyCursorTime(cursor),historyCursorID(cursor),limit+1)
+    }else{
+      rows,err=s.db.Query(r.Context(),selectRuns+
+        " ORDER BY started_at DESC,id DESC LIMIT 30",id)
+    }
     if err!=nil{fail(w,500,"Unable to retrieve runs");return}
     defer rows.Close()
     runs:=[]TestRun{}
@@ -87,7 +99,16 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
       runs=append(runs,run)
     }
     if rows.Err()!=nil{fail(w,500,"Unable to read runs");return}
-    writeJSON(w,200,runs);return
+    if paged{
+      nextCursor:=""
+      if len(runs)>limit{
+        runs=runs[:limit]
+        last:=runs[len(runs)-1]
+        nextCursor=historyNextCursor(last.StartedAt,last.ID)
+      }
+      writeJSON(w,200,listPage[TestRun]{Items:runs,NextCursor:nextCursor})
+    }else{writeJSON(w,200,runs)}
+    return
   }
 
   var input struct{
