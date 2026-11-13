@@ -83,6 +83,11 @@ CREATE INDEX IF NOT EXISTS browser_flows_project_created ON browser_flows(projec
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS flow_id UUID REFERENCES browser_flows(id);
 ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS execution_kind TEXT NOT NULL DEFAULT 'smoke';
 
+-- Immutable human-authored flow revisions (separate from evidence-based repairs).
+ALTER TABLE browser_flows ADD COLUMN IF NOT EXISTS revised_from_flow_id UUID REFERENCES browser_flows(id);
+CREATE UNIQUE INDEX IF NOT EXISTS browser_flow_one_revision_per_source
+ON browser_flows(revised_from_flow_id) WHERE revised_from_flow_id IS NOT NULL;
+
 -- Immutable evidence-based browser repair lineage and reviewed lessons.
 ALTER TABLE browser_flows ADD COLUMN IF NOT EXISTS repaired_from_flow_id UUID REFERENCES browser_flows(id);
 ALTER TABLE browser_flows ADD COLUMN IF NOT EXISTS repaired_from_run_id UUID REFERENCES test_runs(id);
