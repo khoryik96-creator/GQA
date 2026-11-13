@@ -36,13 +36,22 @@ const server=http.createServer((req,res)=>{
  // two clients could both pass the busy check while streaming concurrently.
  running=true;
  let launched=false,released=false,aborted=false,tooLarge=false,bytes=0;
+ const abortController=new AbortController();
  const chunks=[];
  const release=()=>{
   if(released)return;
   released=true;running=false;
  };
- req.once("aborted",()=>{aborted=true;if(!launched)release();});
- req.once("error",()=>{aborted=true;if(!launched)release();});
+ const abortRequest=()=>{
+  aborted=true;
+  abortController.abort();
+  if(!launched)release();
+ };
+ req.once("aborted",abortRequest);
+ req.once("error",abortRequest);
+ // A response socket can disappear after a complete request body was sent.
+ // Aborting the supervisor must also terminate its one-shot worker child.
+ res.once("close",()=>{if(!res.writableEnded)abortRequest();});
  req.once("close",()=>{if(!req.complete&&!launched)release();});
  req.on("data",chunk=>{
   if(tooLarge||aborted)return;
@@ -74,7 +83,7 @@ const server=http.createServer((req,res)=>{
     kind,target_url:input.target_url,
     ...(kind==="flow"?{steps:input.steps}:
       {run_api:input.run_api,run_web:input.run_web})
-   });
+   },{signal:abortController.signal});
    send(res,200,result);
   }catch{
    send(res,500,{error:"Unable to complete isolated job"});

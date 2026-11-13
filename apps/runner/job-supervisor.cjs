@@ -20,6 +20,8 @@ function failureResult(kind) {
     checks: [{ name: "One-shot worker lifecycle", status: "failed", duration_ms: 0,
       detail: kind === "worker_timeout"
         ? "The test exceeded the worker's time limit"
+        : kind === "worker_cancelled"
+        ? "The initiating request was cancelled and the worker was terminated"
         : "The disposable job process exited without valid evidence" }],
     screenshot_base64: "",
     evidence: {
@@ -40,8 +42,10 @@ function terminateGroup(child) {
 function runIsolatedJob(job, {
   script = path.join(__dirname, "job-worker.cjs"),
   timeoutMs = 55000,
-  env = process.env
+  env = process.env,
+  signal
 } = {}) {
+  if (signal?.aborted) return Promise.resolve(failureResult("worker_cancelled"));
   if (!Number.isInteger(timeoutMs) || timeoutMs < 20 || timeoutMs > 60000) {
     return Promise.resolve(failureResult("invalid_worker_timeout"));
   }
@@ -63,12 +67,16 @@ function runIsolatedJob(job, {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abortJob);
       if (kill) terminateGroup(child);
       result.evidence = { ...result.evidence,
         worker_lifecycle: "single_job_process", job_id: jobId };
       resolve(result);
     }
     const timer = setTimeout(() => finish(failureResult("worker_timeout"), true), timeoutMs);
+    function abortJob(){ finish(failureResult("worker_cancelled"), true); }
+    signal?.addEventListener("abort", abortJob, { once: true });
+    if (signal?.aborted) { abortJob(); return; }
     child.on("message", message => {
       if (message?.kind !== "result" || !message.result ||
           !Array.isArray(message.result.checks) ||
