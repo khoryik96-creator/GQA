@@ -160,3 +160,23 @@ test("only exact, bounded fixture job specs enter the journal",t=>{
  const saved=store.create(spec);
  assert.equal(saved.status,"queued");
 });
+
+test("journal lease rejects a simultaneous broker and permits clean release",t=>{
+ const dir=temp(t);
+ const first=new JobStore(dir),second=new JobStore(dir);
+ first.acquireLease();
+ assert.throws(()=>second.acquireLease(),/Another broker still holds/);
+ first.releaseLease();
+ second.acquireLease();
+ second.releaseLease();
+});
+test("stale journal lease can only be reclaimed after owning process dies",t=>{
+ const dir=temp(t);
+ const fs=require("node:fs");
+ fs.writeFileSync(path.join(dir,"broker.lease"),
+   JSON.stringify({pid:2147483647,nonce:"a".repeat(32)}));
+ const store=new JobStore(dir);
+ store.acquireLease();
+ assert.equal(store.leaseToken.length,32);
+ store.releaseLease();
+});

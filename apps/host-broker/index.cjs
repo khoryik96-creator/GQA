@@ -111,13 +111,31 @@ const server=http.createServer(async(req,res)=>{
   }
 });
 server.requestTimeout=70000;
-scheduler.start().then(()=>{
-  server.listen(PORT,HOST,()=>{
-    console.log("GQA broker: durable local jobs enabled on "+HOST+":"+PORT);
-  });
-}).catch(()=>{
-  // Recovery must finish before accepting new jobs: don't accidentally run
-  // queued tests while an old container might remain alive.
-  process.stderr.write("Broker could not reconcile prior jobs. Resolve Docker connectivity before restart.\n");
+// Bind the intended endpoint before executing queued work. The old order
+// could launch a job even when the port was already owned by another broker.
+server.once("error",()=>{
+  process.stderr.write("Host broker cannot bind its authorized endpoint.\n");
   process.exitCode=1;
+  scheduler.store.releaseLease();
 });
+server.listen(PORT,HOST,async()=>{
+  try{
+    scheduler.store.acquireLease();
+    await scheduler.start();
+    console.log("GQA broker: durable local jobs enabled on "+HOST+":"+PORT);
+  }catch(err){
+    process.stderr.write("Broker startup/lease recovery failed: "+err.message+"\n");
+    scheduler.store.releaseLease();
+    server.close();
+    process.exitCode=1;
+  }
+});
+function shutdown(){
+  // A forced stop can still leave a running job; the durable journal then
+  // requires container reconciliation on the next startup.
+  server.close(()=>{scheduler.store.releaseLease();process.exit(0)});
+  setTimeout(()=>{scheduler.store.releaseLease();process.exit(1)},5000).unref();
+}
+process.once("SIGINT",shutdown);
+process.once("SIGTERM",shutdown);
+process.once("exit",()=>scheduler.store.releaseLease());
