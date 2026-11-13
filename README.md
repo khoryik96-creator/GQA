@@ -1,6 +1,6 @@
 # GQA — AI Principal QA Command Center
 
-**Current main:** v0.11 · **Draft branches:** v0.12 Regression Intelligence → v0.13 Reliability Hardening · **Production readiness:** not approved
+**Current main:** v0.13 (Regression Intelligence + Reliability Hardening) · **Production readiness:** local prototype only, not approved
 
 GQA is a project-aware quality assurance command center built with a Go REST
 API, PostgreSQL, a Next.js/TypeScript dashboard and isolated Node/Playwright
@@ -46,9 +46,13 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Fill in **three** independent secrets: `GQA_ADMIN_PASSWORD`,
-`GQA_RUNNER_TOKEN` and `GQA_DB_APP_PASSWORD` (at least 32 URL-safe
-characters). On existing installations, add the new database application
+Fill in **four** independent secrets: `GQA_ADMIN_PASSWORD`,
+`GQA_RUNNER_TOKEN`, `GQA_DB_APP_PASSWORD` and `GQA_DB_ADMIN_PASSWORD`.
+Use a fresh random 32+ character URL-safe value for each database password
+on a **new** installation. On an **existing database volume**, set
+`GQA_DB_ADMIN_PASSWORD` to the original PostgreSQL bootstrap password
+used when the volume was first initialized. Docker Compose cannot change
+an existing PostgreSQL role password by changing this environment variable. On existing installations, add the new database application
 password to your existing `.env`; do not replace or remove the PostgreSQL
 volume. A one-shot migration container creates the limited application
 database role while preserving existing records. The initial administrator password must be **16–72
@@ -99,7 +103,7 @@ The Go API is at **http://localhost:8080** (loopback only).
 Production and high-impact plans cannot execute active tests in this build.
 A real application failure is never automatically marked as passing.
 
-## v0.12 — Regression Intelligence (draft feature branch)
+## v0.12 — Regression Intelligence (merged)
 
 The **Regression Insights** tab groups completed runs of the **same smoke
 plan or immutable browser flow against the same target origin**. It compares
@@ -115,14 +119,14 @@ and never executes additional tests to produce the report.
 
 The endpoint `GET /api/projects/{id}/quality` is read-only and uses the
 same server-side project role restrictions as other project history.
-In the v0.13 branch, worker timeouts, invalid runner evidence and Docker
+In v0.13, worker timeouts, invalid runner evidence and Docker
 failures are reported separately as **infrastructure interruptions**, never
 automatically classified as product regressions.
 
-## v0.13 — Reliability hardening (draft branch)
+## v0.13 — Reliability hardening (merged)
 
-The [hardening PR #14](https://github.com/khoryik96-creator/GQA/pull/14)
-builds on [draft v0.12 PR #13](https://github.com/khoryik96-creator/GQA/pull/13).
+[Merged hardening PR #14](https://github.com/khoryik96-creator/GQA/pull/14)
+builds on [merged Regression Intelligence PR #13](https://github.com/khoryik96-creator/GQA/pull/13).
 It strengthens post-action assertions, complete worker-evidence validation,
 runner concurrency, broker journal ownership, async result retention,
 abandoned-run reconciliation, audit attribution, per-account login throttling,
@@ -141,7 +145,7 @@ disables automatic deletion. A positive value enables deletion of old
 screenshots, not project run records; use only after agreeing retention
 requirements and verifying backups.
 
-**This branch is not a production security certification.** High-assurance
+**This release is not a production security certification.** High-assurance
 execution isolation, multi-instance coordination, account recovery,
 application-build attestation and enterprise tenancy still require separate
 work.
@@ -208,10 +212,10 @@ not a security certification or approval to deploy customer-facing GQA.
 
 GQA v0.11 was consolidated into `main` through
 [merged PR #12](https://github.com/khoryik96-creator/GQA/pull/12).
-Further development is reviewed separately; the v0.12 regression analytics
-implementation is [draft PR #13](https://github.com/khoryik96-creator/GQA/pull/13),
-with its hardening changes in [draft PR #14](https://github.com/khoryik96-creator/GQA/pull/14).
-Neither draft has been merged.
+v0.12 Regression Intelligence was merged through [PR #13](https://github.com/khoryik96-creator/GQA/pull/13),
+and v0.13 reliability/security hardening through [PR #14](https://github.com/khoryik96-creator/GQA/pull/14).
+[PR #15](https://github.com/khoryik96-creator/GQA/pull/15) is an alternative,
+divergent hardening implementation, not an additional release to merge blindly.
 
 ## Documentation
 
