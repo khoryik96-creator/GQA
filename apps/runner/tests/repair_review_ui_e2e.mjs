@@ -121,6 +121,11 @@ try {
   await revisionField.fill(revision);
   await reviewerPage.getByRole("button",{name:"Confirm and save verified repair"}).click();
   await reviewerPage.getByText("Verified locator lesson saved").waitFor({timeout:20000});
+  const auditResponse=await api(reviewerContext,"GET",prefix+"/qa-activity?limit=100");
+  assert.equal(auditResponse.status(),200);
+  const audit=(await auditResponse.json()).items;
+  assert.ok(audit.some(e=>e.action==="repair_approved" && e.actor_email===reviewerEmail &&
+    e.object_type==="repair_acceptance"),"Reviewer approval lacks actor-attributed audit event");
   const lessonsResponse=await api(reviewerContext,"GET",prefix+"/repairs");
   assert.equal(lessonsResponse.status(),200);
   const lessons=await lessonsResponse.json();
