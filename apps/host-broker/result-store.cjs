@@ -3,6 +3,28 @@ const fs=require("node:fs");
 const path=require("node:path");
 const crypto=require("node:crypto");
 const ID=/^[a-f0-9-]{36}$/;
+function syncDirectory(dir){
+ if(process.platform==="win32")return;
+ const fd=fs.openSync(dir,"r");
+ try{fs.fsyncSync(fd)}finally{fs.closeSync(fd)}
+}
+function validPersistedResult(result,id){
+ return !!result && typeof result==="object" && !Array.isArray(result) &&
+  Array.isArray(result.checks) && result.checks.length>=1 && result.checks.length<=20 &&
+  result.checks.every(c=>c && typeof c==="object" &&
+   typeof c.name==="string" && c.name.length<=120 &&
+   typeof c.detail==="string" && c.detail.length<=400 &&
+   ["passed","failed"].includes(c.status) &&
+   Number.isInteger(c.duration_ms) && c.duration_ms>=0) &&
+  typeof result.screenshot_base64==="string" &&
+  result.screenshot_base64.length<=1400000 &&
+  /^[a-zA-Z0-9+/=]*$/.test(result.screenshot_base64) &&
+  !!result.evidence && typeof result.evidence==="object" &&
+  result.evidence.job_id===id &&
+  result.evidence.worker_lifecycle==="ephemeral_container" &&
+  typeof result.evidence.failure_kind==="string" &&
+  result.evidence.failure_kind.length<=80;
+}
 class ResultStore{
  constructor(root){this.dir=path.join(root,"results")}
  file(id){if(!ID.test(id))throw Error("Invalid job ID");return path.join(this.dir,id+".json")}
@@ -33,12 +55,37 @@ class ResultStore{
    fs.writeFileSync(temp,raw,{mode:0o600,flag:"wx"});
    const fd=fs.openSync(temp,"r");try{fs.fsyncSync(fd)}finally{fs.closeSync(fd)}
    fs.renameSync(temp,dest);
+   // Persist the directory entry as well as the file contents: a durable
+   // successful worker result must survive a sudden host power loss.
+   syncDirectory(this.dir);
   }finally{if(fs.existsSync(temp))fs.unlinkSync(temp)}
  }
  get(id){
   const p=this.file(id);
-  if(!fs.existsSync(p)||fs.lstatSync(p).isSymbolicLink()||fs.statSync(p).size>1900000)return null;
-  return JSON.parse(fs.readFileSync(p,"utf8"));
+  let info;
+  try{info=fs.lstatSync(p)}
+  catch(err){if(err.code==="ENOENT")return null;throw err}
+  if(!info.isFile()||info.isSymbolicLink()||info.size>1900000||info.size===0)
+    throw new Error("Stored job evidence is invalid");
+  let value;
+  try{value=JSON.parse(fs.readFileSync(p,"utf8"))}
+  catch(err){
+   if(err instanceof SyntaxError)throw new Error("Stored job evidence is invalid");
+   throw err;
+  }
+  if(!validPersistedResult(value,id))
+    throw new Error("Stored job evidence is invalid");
+  return value;
+ }
+ discard(id){
+  const p=this.file(id);
+  let info;
+  try{info=fs.lstatSync(p)}
+  catch(err){if(err.code==="ENOENT")return;throw err}
+  if(!info.isFile()||info.isSymbolicLink())
+    throw new Error("Unsafe broker result file");
+  fs.unlinkSync(p);
+  syncDirectory(this.dir);
  }
  prune(ids){
   if(!fs.existsSync(this.dir))return;
