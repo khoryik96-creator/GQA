@@ -262,3 +262,31 @@ select, input { color: #dfebf6; border: 1px solid #2a4053; border-radius: 9px; b
   .breadcrumb strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .topbar-actions { min-width: 0; flex: 0 1 auto; flex-wrap: wrap; gap: 8px; }
 }
+
+/* Readable, keyboard-operable immutable browser-flow version history/editor. */
+.browser-version-history, .browser-action-editor {
+  margin: 16px 0; border: 1px solid #314559;
+  background: #0d1928; border-radius: 12px; padding: 16px;
+}
+.browser-version-history > strong, .browser-action-editor h3 { color: #def2f4; font-size: 13px; }
+.browser-version-list, .browser-edit-actions {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;
+}
+.browser-version-list button[aria-pressed="true"] {
+  border-color: #7de4d7; color: #8df5ea; background: #163840;
+}
+.browser-action-editor > p { font-size: 12px; line-height: 1.6; color: #b5c9d6; }
+.browser-edit-step {
+  padding: 12px 0; border-top: 1px solid #2b4052;
+  display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px;
+}
+.browser-edit-step label {
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: 12px; color: #bdcfdf; min-width: 0;
+}
+.browser-edit-step input, .browser-edit-step select { width: 100%; min-width: 0; }
+.browser-edit-step .browser-edit-actions { grid-column: 1 / -1; }
+@media (max-width: 600px) {
+  .browser-edit-step { grid-template-columns: minmax(0,1fr); }
+  .browser-edit-step .browser-edit-actions { grid-column: 1; }
+}
