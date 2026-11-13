@@ -113,6 +113,8 @@ func main() {
   mux.HandleFunc("POST /api/projects/{id}/inspection", auth.project("qa",budgetedAction("repository_inspection",30,s.inspection)))
   mux.HandleFunc("GET /api/projects/{id}/flows", auth.project("read",s.browserFlows))
   mux.HandleFunc("POST /api/projects/{id}/flows", auth.project("qa",budgetedAction("flow_drafting",60,s.browserFlows)))
+  mux.HandleFunc("GET /api/projects/{id}/flows/{flowId}/revisions", auth.project("read",s.flowRevisionHistory))
+  mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/revisions", auth.project("qa",s.createFlowRevision))
   mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/execute", auth.project("qa",budgetedAction("execution",60,s.executeBrowserFlow)))
   mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/propose-repair", auth.project("qa",s.proposeRepair))
   mux.HandleFunc("POST /api/projects/{id}/flows/{flowId}/confirm-repair", auth.project("review",s.confirmRepair))
