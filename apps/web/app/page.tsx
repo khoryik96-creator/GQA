@@ -474,7 +474,7 @@ export default function CommandCenter() {
               value={password} maxLength={72} onChange={e => setPassword(e.target.value)}
               placeholder="Your assigned account password"/>
           </label>
-          {loginError && <div className="browser-flow-error"><AlertTriangle size={15}/>{loginError}</div>}
+          {loginError && <div className="browser-flow-error" role="alert"><AlertTriangle size={15}/>{loginError}</div>}
           <button className="button primary full-width" type="submit" disabled={authBusy || !password}>
             {authBusy ? <Loader2 size={16} className="spin"/> : <LockKeyhole size={16}/>}
             {authBusy ? "Signing in..." : "Sign in"}
@@ -487,7 +487,8 @@ export default function CommandCenter() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <aside className="sidebar" aria-label="Workspace navigation">
         <div className="brand">
           <span className="brand-mark"><BrainCircuit size={22}/></span>
           <div><strong>GQA</strong><small>Principal QA Platform</small></div>
@@ -495,7 +496,7 @@ export default function CommandCenter() {
         <div className="sidebar-section">
           <div className="section-title"><span>PROJECTS</span>{isAdmin&&<button className="icon-btn" title="Create project" onClick={() => setShowCreate(true)}><Plus size={16}/></button>}</div>
           {projects.map(p => (
-            <button key={p.id} className={"project-item " + (selectedId === p.id ? "active" : "")} onClick={() => selectProject(p.id)}>
+            <button key={p.id} type="button" aria-pressed={selectedId === p.id} className={"project-item " + (selectedId === p.id ? "active" : "")} onClick={() => selectProject(p.id)}>
               <Layers3 size={16}/><span>{p.name}</span>
               {selectedId === p.id && <span className="selected-indicator"/>}
             </button>
@@ -509,7 +510,7 @@ export default function CommandCenter() {
         </div>
       </aside>
 
-      <main className="main">
+      <main className="main" id="main-content" tabIndex={-1}>
         <header className="topbar">
           <div className="breadcrumb"><FolderKanban size={17}/><span>Workspace</span><span className="slash">/</span><strong>{selected?.name || "Overview"}</strong></div>
           <div className="topbar-actions">
@@ -526,8 +527,8 @@ export default function CommandCenter() {
         <div className="content">
           {securityOpen && account && <AccountSecurity apiBase={API} email={account.email}
             onClose={()=>setSecurityOpen(false)} onSignedOut={clearSessionUI}/>}
-          {error && <div className="error-banner"><AlertTriangle size={17}/><span>{error}</span><button onClick={() => setError("")} title="Dismiss"><X size={16}/></button></div>}
-          {selected && loadingOverview && <p className="muted small" role="status">Loading project plans, memories and recent runs…</p>}
+          {error && <div className="error-banner" role="alert"><AlertTriangle size={17}/><span>{error}</span><button onClick={() => setError("")} title="Dismiss"><X size={16}/></button></div>}
+          {selected && loadingOverview && <p className="muted small" role="status" aria-live="polite">Loading project plans, memories and recent runs…</p>}
           {selected && error.startsWith("Unable to load ") && !loadingOverview &&
             <button className="button secondary" type="button" onClick={() => setOverviewRevision(n => n + 1)}>Retry project data</button>}
 
