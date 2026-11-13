@@ -41,6 +41,15 @@ jobs:
           node tests/ui_e2e.mjs
           node tests/advanced_ui_e2e.mjs
           node tests/repair_review_ui_e2e.mjs
+          node tests/wcag_axe_audit.mjs
+      - name: Upload WCAG screening report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gqa-wcag-axe-screen
+          path: apps/runner/ui-e2e-artifacts/wcag-axe-report.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Upload browser screenshots on failure
         if: failure()
         uses: actions/upload-artifact@v4
