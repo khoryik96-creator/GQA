@@ -327,4 +327,3 @@ test("stored jobs with malformed idempotency digests fail journal validation",t=
  fs.writeFileSync(file,JSON.stringify(data));
  assert.throws(()=>new JobStore(dir).load(),/Invalid broker journal/);
 });
-
