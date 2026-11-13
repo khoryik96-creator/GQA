@@ -32,7 +32,10 @@ jobs:
             postgres:16-alpine
           ready=false
           for i in $(seq 1 60); do
-            if docker exec gqa-synthetic-benchmark-db pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+            # Postgres briefly accepts connections during initdb before its
+            # final restart; pg_isready alone can pass during that window.
+            if docker logs gqa-synthetic-benchmark-db 2>&1 | grep -Fq 'PostgreSQL init process complete; ready for start up.' && \
+               docker exec gqa-synthetic-benchmark-db pg_isready -U postgres -d postgres >/dev/null 2>&1; then
               ready=true
               break
             fi
