@@ -33,9 +33,10 @@ type RunEvidence = {
   failed_requests?: number; http_5xx?: number;
 };
 type TestRun = {
-  id: string; flow_id?: string; status: string; checks: SmokeCheck[];
-  screenshot_available: boolean; started_at: string; execution_kind?: string;
-  evidence?: RunEvidence;
+  id: string; project_id: string; plan_id: string; target_url: string;
+  flow_id?: string; status: string; checks: SmokeCheck[];
+  screenshot_available: boolean; started_at: string; finished_at: string | null;
+  execution_kind?: string; evidence?: RunEvidence;
 };
 type Props = {
   projectId: string;
