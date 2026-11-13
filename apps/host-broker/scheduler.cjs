@@ -31,7 +31,7 @@ class Scheduler {
       throw Object.assign(new Error("Job queue capacity reached"),{status:429});
     const item=this.store.create(spec);
     this.pump();
-    return publicJob(item);
+    return this.get(item.id);
   }
   submitSync(spec){
     if(this.hasInFlight())
