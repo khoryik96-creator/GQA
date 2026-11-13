@@ -139,7 +139,8 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   body,_:=json.Marshal(map[string]any{"target_url":target,"run_api":runAPI,"run_web":runWeb})
   runnerURL:=os.Getenv("GQA_RUNNER_URL")
   if runnerURL==""{runnerURL="http://runner:8090/run"}
-  ctx,cancel:=context.WithTimeout(r.Context(),30*time.Second)
+  // Execute with a bounded context detached from the browser connection.
+  ctx,cancel:=context.WithTimeout(context.WithoutCancel(r.Context()),30*time.Second)
   defer cancel()
   req,err:=http.NewRequestWithContext(ctx,http.MethodPost,runnerURL,bytes.NewReader(body))
   if err!=nil{fail(w,500,"Unable to initialize runner request");return}
@@ -176,7 +177,9 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   }
   resultJSON,_:=json.Marshal(run.Checks)
   evidenceJSON,_:=json.Marshal(run.Evidence)
-  err=s.db.QueryRow(r.Context(),`
+  persistCtx,persistCancel:=context.WithTimeout(context.Background(),10*time.Second)
+  defer persistCancel()
+  err=s.db.QueryRow(persistCtx,`
     UPDATE test_runs SET checks=$2::jsonb,status=$3,screenshot_available=$4,
     evidence=$5::jsonb,finished_at=now() WHERE id=$1::uuid RETURNING finished_at`,
     run.ID,string(resultJSON),run.Status,run.ScreenshotAvailable,string(evidenceJSON)).Scan(&run.FinishedAt)

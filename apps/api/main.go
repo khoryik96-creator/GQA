@@ -76,6 +76,19 @@ func main() {
   if err = db.Ping(ctx); err != nil { log.Fatal("database: ", err) }
   if _, err = db.Exec(ctx, schema, pgx.QueryExecModeSimpleProtocol); err != nil { log.Fatal("migrate schema: ", err) }
   s := &server{db: db}
+  // An API crash must not strand "running" records indefinitely.
+  recoverCtx,recoverCancel:=context.WithTimeout(context.Background(),10*time.Second)
+  if err:=s.reconcileStaleRuns(recoverCtx);err!=nil{log.Printf("run recovery: %v",err)}
+  recoverCancel()
+  go func(){
+   ticker:=time.NewTicker(time.Minute)
+   defer ticker.Stop()
+   for range ticker.C{
+    ctx,cancel:=context.WithTimeout(context.Background(),10*time.Second)
+    if err:=s.reconcileStaleRuns(ctx);err!=nil{log.Printf("run recovery: %v",err)}
+    cancel()
+   }
+  }()
   origin := os.Getenv("ALLOWED_ORIGIN")
   if origin == "" { origin = "http://localhost:3000" }
   auth,err:=newAuthenticator(db,os.Getenv("GQA_ADMIN_PASSWORD"),origin,

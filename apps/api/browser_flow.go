@@ -203,7 +203,7 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
   body,_:=json.Marshal(map[string]any{"target_url":input.TargetURL,"steps":flow.Steps})
   endpoint:=os.Getenv("GQA_RUNNER_FLOW_URL")
   if endpoint==""{endpoint="http://runner:8090/flow"}
-  ctx,cancel:=context.WithTimeout(r.Context(),60*time.Second)
+  ctx,cancel:=context.WithTimeout(context.WithoutCancel(r.Context()),60*time.Second)
   defer cancel()
   reply:=workerReply{Checks:[]SmokeCheck{}}
   req,err:=http.NewRequestWithContext(ctx,http.MethodPost,endpoint,bytes.NewReader(body))
@@ -228,7 +228,9 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
     }}}
   }
   reply=verifiedWorkerReply(reply,expectedFlowChecks(flow.Steps))
-  if err:=persistFlowEvidence(r.Context(),s,&run,reply);err!=nil{
+  persistCtx,persistCancel:=context.WithTimeout(context.Background(),10*time.Second)
+  defer persistCancel()
+  if err:=persistFlowEvidence(persistCtx,s,&run,reply);err!=nil{
     fail(w,500,"Browser run finished but results could not be saved");return
   }
   writeJSON(w,201,run)
