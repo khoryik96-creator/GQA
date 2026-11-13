@@ -14,7 +14,6 @@ import (
   "strings"
   "time"
 
-  "github.com/jackc/pgx/v5"
   "github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -74,7 +73,11 @@ func main() {
   if err != nil { log.Fatal(err) }
   defer db.Close()
   if err = db.Ping(ctx); err != nil { log.Fatal("database: ", err) }
-  if _, err = db.Exec(ctx, schema, pgx.QueryExecModeSimpleProtocol); err != nil { log.Fatal("migrate schema: ", err) }
+  if len(os.Args)>1 && os.Args[1]=="migrate"{
+    if err:=applySchemaAndGrants(ctx,db);err!=nil{log.Fatal("migration: ",err)}
+    log.Printf("GQA schema and least-privilege application grants ready")
+    return
+  }
   s := &server{db: db}
   // An API crash must not strand "running" records indefinitely.
   recoverCtx,recoverCancel:=context.WithTimeout(context.Background(),10*time.Second)

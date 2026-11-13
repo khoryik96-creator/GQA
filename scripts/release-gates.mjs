@@ -20,6 +20,9 @@ check(/GQA_ADMIN_PASSWORD:\s*\$\{GQA_ADMIN_PASSWORD:\?/.test(compose),
  "compose refuses missing administrator password");
 check(/GQA_RUNNER_TOKEN:\s*\$\{GQA_RUNNER_TOKEN:\?/.test(compose),
  "compose refuses missing internal runner secret");
+check(/GQA_DB_APP_PASSWORD:\s*\$\{GQA_DB_APP_PASSWORD:\?/.test(compose) &&
+  /gqa_app:/.test(compose) && /service_completed_successfully/.test(compose),
+ "app DB uses a secret non-superuser role and migration gate");
 check(/127\.0\.0\.1:8080:8080/.test(compose) &&
       /127\.0\.0\.1:3000:3000/.test(compose),
  "API and UI are published on local loopback only");

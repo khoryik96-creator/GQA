@@ -12,20 +12,38 @@ services:
       retries: 20
     volumes:
       - gqa_pgdata:/var/lib/postgresql/data
+    networks:
+      - db_private
+
+  migrate:
+    image: gqa-api:local
+    build: ./apps/api
+    command: ["migrate"]
+    networks:
+      - db_private
+    environment:
+      DATABASE_URL: postgres://gqa:gqa_local_only@db:5432/gqa?sslmode=disable
+      GQA_DB_APP_PASSWORD: ${GQA_DB_APP_PASSWORD:?Set GQA_DB_APP_PASSWORD in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
 
   api:
+    image: gqa-api:local
     build: ./apps/api
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
       - default
       - qa_private
+      - db_private
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     environment:
-      DATABASE_URL: postgres://gqa:gqa_local_only@db:5432/gqa?sslmode=disable
+      DATABASE_URL: postgres://gqa_app:${GQA_DB_APP_PASSWORD:?Set GQA_DB_APP_PASSWORD in .env}@db:5432/gqa?sslmode=disable
       PORT: "8080"
       ALLOWED_ORIGIN: http://localhost:3000
       GQA_ADMIN_PASSWORD: ${GQA_ADMIN_PASSWORD:?Set GQA_ADMIN_PASSWORD in .env}
@@ -45,8 +63,8 @@ services:
     volumes:
       - gqa_evidence:/evidence
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       runner:
         condition: service_healthy
       fixture:
@@ -126,6 +144,8 @@ volumes:
 # Browser test containers have no external network egress by default.
 # The API uses both networks because it needs GitHub and approved LLM access.
 networks:
+  db_private:
+    internal: true
   qa_private:
     internal: true
 

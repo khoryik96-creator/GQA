@@ -46,8 +46,10 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Fill in **both** `GQA_ADMIN_PASSWORD` and `GQA_RUNNER_TOKEN` with separate
-unique, random secrets. The initial administrator password must be **16–72
+Fill in **all three** `GQA_ADMIN_PASSWORD`, `GQA_RUNNER_TOKEN`, and
+`GQA_DB_APP_PASSWORD` with separate unique random secrets. The database
+application password must be URL-safe (24+ alphanumeric characters) and
+is used only by the restricted runtime database role. The initial administrator password must be **16–72
 bytes**, and the runner token must be at least 24 characters. Never commit
 `.env`, share the runner token or place credentials inside project memory.
 
