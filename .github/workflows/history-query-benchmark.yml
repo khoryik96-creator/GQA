@@ -1,0 +1,68 @@
+name: GQA Synthetic Large-History Query Benchmark
+
+on:
+  pull_request:
+    paths:
+      - 'apps/api/**'
+      - 'db-migrate/**'
+      - 'scripts/history_query_benchmark.sql'
+      - '.github/workflows/history-query-benchmark.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/**'
+      - 'db-migrate/**'
+      - 'scripts/history_query_benchmark.sql'
+      - '.github/workflows/history-query-benchmark.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start disposable PostgreSQL (no host port exposed)
+        run: |
+          docker run -d --name gqa-synthetic-benchmark-db \
+            -e POSTGRES_PASSWORD="$(openssl rand -hex 32)" \
+            postgres:16-alpine
+          ready=false
+          for i in $(seq 1 60); do
+            if docker exec gqa-synthetic-benchmark-db pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = true
+      - name: Apply current v0.13 baseline schema to disposable database
+        run: |
+          docker exec -i gqa-synthetic-benchmark-db psql -X -U postgres -d postgres \
+            -v ON_ERROR_STOP=1 < db-migrate/versions/0001_baseline.sql
+      - name: Capture first-page and deep-page SQL plans for 100k synthetic rows
+        run: |
+          set -o pipefail
+          docker exec -i gqa-synthetic-benchmark-db psql -X -U postgres -d postgres \
+            -v ON_ERROR_STOP=1 < scripts/history_query_benchmark.sql \
+            | tee gqa-history-benchmark-results.txt
+          grep -q 'plans deep page' gqa-history-benchmark-results.txt
+          grep -q 'runs deep page' gqa-history-benchmark-results.txt
+          grep -q 'browser flows deep page' gqa-history-benchmark-results.txt
+          grep -q 'Execution Time' gqa-history-benchmark-results.txt
+      - name: Upload measured query plan evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: gqa-history-query-plans
+          path: gqa-history-benchmark-results.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Disposable database diagnostics
+        if: failure()
+        run: docker logs --tail 120 gqa-synthetic-benchmark-db || true
+      - name: Tear down synthetic PostgreSQL and discard its contents
+        if: always()
+        run: docker rm -f gqa-synthetic-benchmark-db || true
