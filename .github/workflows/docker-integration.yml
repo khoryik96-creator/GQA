@@ -247,6 +247,42 @@ jobs:
               historical = json.loads(response.read().decode("utf-8"))
           assert any(x.get("flow_id") == flow["id"] for x in historical)
 
+          # v0.15: opt-in keyset pages for plans, run history and saved flows.
+          # Exercise timestamp/UUID cursors against real persisted records;
+          # legacy GET still returns an array for old clients.
+          for collection in ("plans", "runs", "flows"):
+              endpoint = f"/api/projects/{project_id}/{collection}"
+              with urllib.request.urlopen(BASE + endpoint) as response:
+                  legacy_records = json.load(response)
+              assert isinstance(legacy_records, list) and len(legacy_records) >= 2, collection
+              seen_ids = []
+              cursor_value = ""
+              for _ in range(20):
+                  paginated_url = endpoint + "?limit=1"
+                  if cursor_value:
+                      paginated_url += "&cursor=" + cursor_value
+                  with urllib.request.urlopen(BASE + paginated_url) as response:
+                      page = json.load(response)
+                  assert len(page["items"]) <= 1, (collection, page)
+                  seen_ids.extend(item["id"] for item in page["items"])
+                  cursor_value = page["next_cursor"]
+                  if not cursor_value:
+                      break
+              assert seen_ids == [item["id"] for item in legacy_records], (collection,seen_ids,legacy_records)
+              assert len(seen_ids) == len(set(seen_ids))
+              try:
+                  urllib.request.urlopen(BASE + endpoint + "?limit=101", timeout=5)
+              except urllib.error.HTTPError as exc:
+                  assert exc.code == 400
+              else:
+                  raise AssertionError(f"{collection}: invalid page size accepted")
+              try:
+                  urllib.request.urlopen(BASE + endpoint + "?cursor=invalid", timeout=5)
+              except urllib.error.HTTPError as exc:
+                  assert exc.code == 400
+              else:
+                  raise AssertionError(f"{collection}: invalid cursor accepted")
+
           # Simulate a UI rename without changing the business outcome.
           broken = request(f"/api/projects/{project_id}/flows/{flow['id']}/execute", {
               "target_url": "http://fixture-renamed:8081",
