@@ -185,3 +185,14 @@ CREATE TABLE IF NOT EXISTS account_security_audit (
 );
 CREATE INDEX IF NOT EXISTS account_security_audit_recent
  ON account_security_audit(created_at DESC);
+
+-- New writes are attributed. Older records intentionally retain NULL actors.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES gqa_users(id);
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES gqa_users(id);
+ALTER TABLE qa_requests ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES gqa_users(id);
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES gqa_users(id);
+ALTER TABLE browser_flows ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES gqa_users(id);
+ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES gqa_users(id);
+ALTER TABLE repair_acceptances ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES gqa_users(id);
+ALTER TABLE repair_acceptances ADD COLUMN IF NOT EXISTS revision_source TEXT NOT NULL DEFAULT 'user_declared';
+CREATE INDEX IF NOT EXISTS test_runs_actor_date ON test_runs(created_by,started_at DESC);

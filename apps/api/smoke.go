@@ -127,11 +127,12 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   }
   if !runAPI && !runWeb{fail(w,400,"Plan has no supported smoke agents (API or Web QA)");return}
 
+  actor,_:=currentAccount(r)
   var run TestRun
   run.ProjectID=id;run.PlanID=input.PlanID;run.TargetURL=target
   err=s.db.QueryRow(r.Context(),`
-    INSERT INTO test_runs(project_id,plan_id,target_url,status)
-    VALUES ($1::uuid,$2::uuid,$3,'running') RETURNING id::text,started_at`,id,input.PlanID,target).Scan(&run.ID,&run.StartedAt)
+    INSERT INTO test_runs(project_id,plan_id,target_url,status,created_by)
+    VALUES ($1::uuid,$2::uuid,$3,'running',$4::uuid) RETURNING id::text,started_at`,id,input.PlanID,target,actor.ID).Scan(&run.ID,&run.StartedAt)
   if err!=nil{fail(w,500,"Unable to initialize run");return}
   run.Status="running"
   run.ExecutionKind="smoke"

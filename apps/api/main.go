@@ -264,10 +264,11 @@ func (s *server) projects(w http.ResponseWriter, r *http.Request) {
     fail(w, 400, "Provide a 2-100 character name, GitHub repository URL, valid application type and optional stack")
     return
   }
+  actor,_:=currentAccount(r)
   var p Project
   err := s.db.QueryRow(r.Context(),
-    "INSERT INTO projects (name,repo_url,app_type,stack) VALUES ($1,$2,$3,$4) RETURNING id::text,name,repo_url,app_type,stack,created_at",
-    input.Name,input.RepoURL,input.AppType,input.Stack,
+    "INSERT INTO projects (name,repo_url,app_type,stack,created_by) VALUES ($1,$2,$3,$4,$5::uuid) RETURNING id::text,name,repo_url,app_type,stack,created_at",
+    input.Name,input.RepoURL,input.AppType,input.Stack,actor.ID,
   ).Scan(&p.ID,&p.Name,&p.RepoURL,&p.AppType,&p.Stack,&p.CreatedAt)
   if err != nil { fail(w,500,"Unable to create project"); return }
   p.MyRole="admin"
@@ -326,10 +327,11 @@ func (s *server) memories(w http.ResponseWriter, r *http.Request) {
     if errors.Is(err,pgx.ErrNoRows) { fail(w,404,"Memory to supersede not found in this project"); return }
     if err != nil { fail(w,500,"Could not supersede memory"); return }
   }
+  actor,_:=currentAccount(r)
   var m Memory
   err = tx.QueryRow(r.Context(),
-    "INSERT INTO memories (project_id,kind,content,source,status,supersedes_id) VALUES ($1::uuid,$2,$3,'user','confirmed',NULLIF($4,'')::uuid) RETURNING id::text,project_id::text,kind,content,source,status,COALESCE(supersedes_id::text,''),created_at",
-    id,input.Kind,input.Content,input.SupersedesID,
+    "INSERT INTO memories (project_id,kind,content,source,status,supersedes_id,created_by) VALUES ($1::uuid,$2,$3,'user','confirmed',NULLIF($4,'')::uuid,$5::uuid) RETURNING id::text,project_id::text,kind,content,source,status,COALESCE(supersedes_id::text,''),created_at",
+    id,input.Kind,input.Content,input.SupersedesID,actor.ID,
   ).Scan(&m.ID,&m.ProjectID,&m.Kind,&m.Content,&m.Source,&m.Status,&m.SupersedesID,&m.CreatedAt)
   if err != nil { fail(w,500,"Unable to save memory (check project ID)"); return }
   if err = tx.Commit(r.Context()); err != nil { fail(w,500,"Unable to commit memory"); return }
@@ -414,13 +416,14 @@ func (s *server) plans(w http.ResponseWriter, r *http.Request) {
   plan.ConsultedMemories=memories
   plan.RepositoryEvidence=snapshot
   plan.TestSpec=spec
+  actor,_:=currentAccount(r)
   err = tx.QueryRow(r.Context(),
-    "INSERT INTO qa_requests (project_id,prompt,environment) VALUES ($1::uuid,$2,$3) RETURNING id::text",
-    id,input.Prompt,input.Environment).Scan(&plan.RequestID)
+    "INSERT INTO qa_requests (project_id,prompt,environment,created_by) VALUES ($1::uuid,$2,$3,$4::uuid) RETURNING id::text",
+    id,input.Prompt,input.Environment,actor.ID).Scan(&plan.RequestID)
   if err != nil { fail(w,500,"Unable to save QA request"); return }
   err = tx.QueryRow(r.Context(),
-    "INSERT INTO plans (project_id,request_id,selected_agents,warnings,approval_required,consulted_memories,repo_context,test_spec) VALUES ($1::uuid,$2::uuid,$3::jsonb,$4::jsonb,$5,$6::jsonb,$7::jsonb,$8::jsonb) RETURNING id::text,created_at",
-    id,plan.RequestID,string(agentsJSON),string(warningsJSON),decision.ApprovalRequired,string(memoriesJSON),string(repoJSON),string(specJSON)).Scan(&plan.ID,&plan.CreatedAt)
+    "INSERT INTO plans (project_id,request_id,selected_agents,warnings,approval_required,consulted_memories,repo_context,test_spec,created_by) VALUES ($1::uuid,$2::uuid,$3::jsonb,$4::jsonb,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::uuid) RETURNING id::text,created_at",
+    id,plan.RequestID,string(agentsJSON),string(warningsJSON),decision.ApprovalRequired,string(memoriesJSON),string(repoJSON),string(specJSON),actor.ID).Scan(&plan.ID,&plan.CreatedAt)
   if err != nil { fail(w,500,"Unable to save QA plan"); return }
   if err = tx.Commit(r.Context()); err != nil { fail(w,500,"Unable to commit QA plan"); return }
   writeJSON(w,201,plan)
