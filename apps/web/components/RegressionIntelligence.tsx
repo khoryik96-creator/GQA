@@ -6,34 +6,38 @@ import {
  CheckCircle2,ChevronDown,ChevronUp,RefreshCw,ShieldCheck
 } from "lucide-react";
 
-type QualityPoint={run_id:string;status:"passed"|"failed";started_at:string};
+type TestOutcome="passed"|"failed"|"infrastructure_error";
+type QualityPoint={run_id:string;status:TestOutcome;started_at:string};
 type QualityCase={
  id:string;label:string;kind:"smoke"|"browser_flow";target_url:string;
- latest_run_id:string;previous_run_id?:string;status:"passed"|"failed";
+ latest_run_id:string;previous_run_id?:string;status:TestOutcome;
  previous_status?:string;transition:string;failing_checks:string[];
  newly_failing_checks:string[];recovered_checks:string[];
  outcome_switches:number;unstable_pattern:boolean;observations:number;
  history:QualityPoint[];last_run_at:string;
 };
-type QualityDay={date:string;passed:number;failed:number};
+type QualityDay={date:string;passed:number;failed:number;infrastructure:number};
 type QualityReport={
  sample_runs:number;sample_limit:number;truncated:boolean;
  scenarios:number;passing:number;failing:number;regressions:number;
  recoveries:number;persistent_failures:number;unstable_patterns:number;
+ infrastructure_failures:number;
  cases:QualityCase[];daily:QualityDay[];
 };
-type Filter="all"|"regressions"|"failures"|"recovered"|"switching";
+type Filter="all"|"regressions"|"failures"|"recovered"|"switching"|"infrastructure";
 const filters:{key:Filter;label:string}[]=[
  {key:"all",label:"All scenarios"},
  {key:"regressions",label:"Regressions"},
  {key:"failures",label:"Unresolved failures"},
  {key:"recovered",label:"Recoveries"},
- {key:"switching",label:"Outcome switching"}
+ {key:"switching",label:"Outcome switching"},
+ {key:"infrastructure",label:"Worker interruptions"}
 ];
 const transitions:Record<string,string>={
  regression:"New regression",persistent_failure:"Repeated failure",
  new_failure:"First observed failure",recovered:"Recovered",
- stable_pass:"Continues passing",first_pass:"First observed pass"
+ stable_pass:"Continues passing",first_pass:"First observed pass",
+ infrastructure_error:"Worker/infrastructure interruption"
 };
 const positive=new Set(["recovered","stable_pass","first_pass"]);
 function shortDate(raw:string){
@@ -43,9 +47,10 @@ function shortDate(raw:string){
 function Scenario({item}:{item:QualityCase}){
  const [expanded,setExpanded]=useState(false);
  const isPositive=positive.has(item.transition);
+ const isInfrastructure=item.status==="infrastructure_error";
  return <article className={"quality-scenario "+(item.status==="failed"?"quality-failure":"")}>
   <div className="quality-scenario-top">
-   <span className={isPositive?"quality-state positive":"quality-state warning"}>
+   <span className={isInfrastructure?"quality-state caution":isPositive?"quality-state positive":"quality-state warning"}>
     {isPositive?<CheckCircle2 size={14}/>:<AlertTriangle size={14}/>}
     {transitions[item.transition]||item.transition.replaceAll("_"," ")}
    </span>
@@ -72,7 +77,7 @@ function Scenario({item}:{item:QualityCase}){
     {item.history.map(point=><div key={point.run_id} className={"quality-history-mark "+point.status}
       title={point.status+" · "+shortDate(point.started_at)}>
       {point.status==="passed"?<CheckCircle2 size={14}/>:<AlertTriangle size={14}/>}
-      <span>{point.status}</span>
+      <span>{point.status==="infrastructure_error"?"worker issue":point.status}</span>
     </div>)}
    </div>
    <p className="quality-small">Chronological recent results (oldest to newest). Compare only the same plan or reviewed flow on the same target.</p>
@@ -92,6 +97,9 @@ function Scenario({item}:{item:QualityCase}){
     <span>Latest run: <code>{item.latest_run_id}</code></span>
     {item.previous_run_id&&<span>Previous run: <code>{item.previous_run_id}</code></span>}
    </div>
+   {isInfrastructure&&<p className="quality-caution">
+    This was an execution/infrastructure interruption. It is not counted as an application regression.
+   </p>}
    {item.unstable_pattern&&<p className="quality-caution">
     Multiple pass/fail transitions occurred in the recent sample. This is an instability signal, not proof of a flaky test.
    </p>}
@@ -105,10 +113,11 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
  const [error,setError]=useState("");
  const [revision,setRevision]=useState(0);
  const [filter,setFilter]=useState<Filter>("all");
+ const [refreshedAt,setRefreshedAt]=useState<Date|null>(null);
 
  useEffect(()=>{
   let active=true;
-  setLoading(true);setError("");
+  setLoading(true);setError("");setReport(null);
   fetch(apiBase+"/api/projects/"+projectId+"/quality",{
    credentials:"include",cache:"no-store"
   }).then(async response=>{
@@ -117,7 +126,7 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
     throw new Error(body.error||"Unable to read run history");
    }
    return response.json() as Promise<QualityReport>;
-  }).then(result=>{if(active)setReport(result)})
+  }).then(result=>{if(active){setReport(result);setRefreshedAt(new Date())}})
   .catch(err=>{if(active)setError((err as Error).message)})
   .finally(()=>{if(active)setLoading(false)});
   return ()=>{active=false};
@@ -131,6 +140,7 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
     case "failures":return c.status==="failed";
     case "recovered":return c.transition==="recovered";
     case "switching":return c.unstable_pattern;
+    case "infrastructure":return c.status==="infrastructure_error";
     default:return true;
    }
   });
@@ -147,12 +157,14 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
    {error&&<div className="browser-flow-error"><AlertTriangle size={15}/>{error}</div>}
    {loading&&<p className="muted small">Analysing recent completed QA runs…</p>}
    {report&&<>
+    {refreshedAt&&<p className="quality-small">Last refreshed {refreshedAt.toLocaleString()}</p>}
     <div className="quality-metrics">
      <div><span>Scenarios</span><strong>{report.scenarios}</strong><small>{report.sample_runs} completed runs sampled</small></div>
      <div><span>Passing</span><strong>{report.passing}</strong><small>Latest outcome by scenario</small></div>
      <div><span>Unresolved failures</span><strong>{report.failing}</strong><small>{report.persistent_failures} repeated</small></div>
      <div><span>Regressions</span><strong>{report.regressions}</strong><small>Pass → fail transitions</small></div>
      <div><span>Recovered</span><strong>{report.recoveries}</strong><small>Fail → pass transitions</small></div>
+     <div><span>Worker issues</span><strong>{report.infrastructure_failures}</strong><small>Excluded from product regressions</small></div>
     </div>
     {report.truncated&&<p className="quality-caution">
      This view uses the most recent {report.sample_limit} completed runs. Older results were excluded, so a first observed result might have earlier history.
@@ -161,20 +173,32 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
       <div className="quality-section-heading"><strong>Daily test executions</strong><span>Recent sampled days · UTC</span></div>
       <div className="quality-bars">
        {report.daily.map(day=>{
-        const total=day.passed+day.failed,pass=total===0?0:day.passed/total*100;
-        const max=Math.max(1,...report.daily.map(d=>d.passed+d.failed));
-        return <div key={day.date} className="quality-day" title={day.date+": "+day.passed+" passed, "+day.failed+" failed"}>
+        const total=day.passed+day.failed+day.infrastructure;
+        const pass=total===0?0:day.passed/total*100;
+        const fail=total===0?0:day.failed/total*100;
+        const max=Math.max(1,...report.daily.map(d=>d.passed+d.failed+d.infrastructure));
+        return <div key={day.date} className="quality-day" title={day.date+": "+day.passed+" passed, "+day.failed+" failed, "+day.infrastructure+" worker interruptions"}>
          <strong>{total}</strong>
          <div className="quality-stack" style={{height:Math.max(18,Math.round(115*total/max))}}>
-          <div className="quality-stack-fail" style={{height:(100-pass)+"%"}}/>
+          <div className="quality-stack-infra" style={{height:(100-pass-fail)+"%"}}/>
+          <div className="quality-stack-fail" style={{height:fail+"%"}}/>
           <div className="quality-stack-pass" style={{height:pass+"%"}}/>
          </div>
          <small>{day.date.slice(5)}</small>
         </div>;
        })}
       </div>
-      <div className="quality-legend"><span><i className="pass"/> Passed</span><span><i className="fail"/> Failed</span></div>
+      <div className="quality-legend"><span><i className="pass"/> Passed</span><span><i className="fail"/> Failed</span><span><i className="infra"/> Worker issue</span></div>
     </div>}
+    {report.daily.length>0&&<table className="quality-table">
+     <caption>Accessible summary of daily QA execution outcomes (UTC)</caption>
+     <thead><tr><th scope="col">Date</th><th scope="col">Passed</th>
+      <th scope="col">Failed</th><th scope="col">Worker issue</th></tr></thead>
+     <tbody>{report.daily.map(day=><tr key={day.date}>
+      <th scope="row">{day.date}</th><td>{day.passed}</td><td>{day.failed}</td>
+      <td>{day.infrastructure}</td>
+     </tr>)}</tbody>
+    </table>}
    </>}
   </section>
   <section className="card">
@@ -189,7 +213,7 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
       onClick={()=>setFilter(f.key)}>{f.label}</button>)}
    </div>
    {report && <p className="quality-small">{filtered.length} of {report.cases.length} scenarios in the selected view</p>}
-   {!loading&&filtered.length===0&&<div className="quality-empty">
+   {!loading&&!error&&filtered.length===0&&<div className="quality-empty">
     <CheckCircle2 size={24}/>
     {report?.scenarios===0?
       <p>No completed QA runs yet. Execute a reviewed test or smoke check to establish the first observation.</p>:
@@ -201,6 +225,7 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
    <p className="fine-print quality-disclaimer">
     A regression means the same flow or smoke plan passed previously and now fails on the same origin.
     Pass/fail switching is an investigation signal, not a definitive flaky-test diagnosis.
+    Worker errors and interrupted runs are not interpreted as application regressions.
     Comparisons are based on recorded checks, not an AI-generated claim.
    </p>
   </section>
