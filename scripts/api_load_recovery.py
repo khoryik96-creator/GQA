@@ -9,7 +9,6 @@ import concurrent.futures
 import http.cookiejar
 import json
 import os
-import random
 import statistics
 import subprocess
 import sys
@@ -167,9 +166,9 @@ def exercise_db_interruption(cookie, project_id):
         docker("stop", "db")
         stopped = True
         status, _ = request("/api/projects/" + project_id + "/memories?limit=10", cookie=cookie)
-        if status == 200:
-            raise AssertionError("API served project data while its backing database was stopped")
-        print("Database interruption rejected authenticated reads; HTTP status", status)
+        if status != 503:
+            raise AssertionError("Expected retryable 503 during DB outage, not " + str(status))
+        print("Database interruption produced retryable HTTP 503 without revoking the session")
     finally:
         if stopped:
             docker("up", "-d", "--wait", "db")
