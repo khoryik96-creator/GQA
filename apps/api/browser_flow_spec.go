@@ -74,6 +74,11 @@ func validBrowserActions(actions []BrowserAction) error {
     if strings.HasPrefix(a.Op,"assert_"){assertions++}
   }
   if assertions==0 {return errors.New("browser flow must have at least one assertion")}
+  // Every flow must assert its final observable state. An action after the
+  // last assertion is not a verified QA test even when the click succeeds.
+  if !strings.HasPrefix(actions[len(actions)-1].Op,"assert_") {
+    return errors.New("browser flow must end with a postcondition assertion")
+  }
   return nil
 }
 

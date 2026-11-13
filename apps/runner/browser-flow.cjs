@@ -13,6 +13,7 @@ function validateFlow(steps) {
   if (!Array.isArray(steps) || steps.length < 2 || steps.length > 8) return false;
   if (!steps.some(s => s && ["assert_text", "assert_visible_role", "assert_url_path"].includes(s.op))) return false;
   if (steps[0]?.op !== "navigate") return false;
+  if (!["assert_text", "assert_visible_role", "assert_url_path"].includes(steps.at(-1)?.op)) return false;
   for (const s of steps) {
     if (!s || typeof s !== "object" || Array.isArray(s)) return false;
     if (Object.keys(s).some(key => !["op","path","role","name","label","value","text"].includes(key))) return false;

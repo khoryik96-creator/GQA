@@ -45,3 +45,13 @@ func TestModelBrowserFlowProvider(t *testing.T){
   if err!=nil{t.Fatal(err)}
   if result.GenerationMode!="model"||len(result.Steps)!=2{t.Fatalf("bad model draft: %#v",result)}
 }
+
+func TestNoUnverifiedFinalAction(t *testing.T) {
+ bad:=[]BrowserAction{{Op:"navigate",Path:"/"},
+  {Op:"assert_visible_role",Role:"heading",Name:"Ready"},
+  {Op:"click_role",Role:"button",Name:"Delete"}}
+ if err:=validBrowserActions(bad);err==nil {t.Fatal("Unverified final action was accepted")}
+ good:=append([]BrowserAction(nil),bad...)
+ good=append(good,BrowserAction{Op:"assert_text",Text:"Deleted"})
+ if err:=validBrowserActions(good);err!=nil {t.Fatalf("Final postcondition rejected: %v",err)}
+}

@@ -32,3 +32,13 @@ test("rejects dangerous paths", () => {
   assert.equal(safePath("/"), true);
   assert.equal(safePath("/docs"), true);
 });
+
+test("last browser action must be followed by a verified postcondition",()=>{
+  const noAssertionAfterClick=[
+    {op:"navigate",path:"/"},
+    {op:"assert_visible_role",role:"heading",name:"Ready"},
+    {op:"click_role",role:"button",name:"Delete"}
+  ];
+  assert.equal(validateFlow(noAssertionAfterClick),false);
+  assert.equal(validateFlow([...noAssertionAfterClick,{op:"assert_text",text:"Deleted"}]),true);
+});
