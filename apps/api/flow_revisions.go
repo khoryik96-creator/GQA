@@ -133,4 +133,3 @@ func (s *server) flowRevisionHistory(w http.ResponseWriter,r *http.Request){
  writeJSON(w,200,history)
 }
 
-var _=strings.TrimSpace
