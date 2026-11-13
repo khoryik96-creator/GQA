@@ -213,3 +213,18 @@ select, input { color: #dfebf6; border: 1px solid #2a4053; border-radius: 9px; b
   outline: 3px solid #65f1dd;
   outline-offset: 3px;
 }
+
+/* Keep mobile tab navigation scrollable inside the viewport instead of making
+   the entire document horizontally scroll. Tabs remain keyboard focusable. */
+@media (max-width: 760px) {
+  .main, .content { min-width: 0; max-width: 100%; }
+  .tabs {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    gap: 16px;
+    scrollbar-width: thin;
+  }
+  .tabs button { flex: 0 0 auto; white-space: nowrap; }
+}
