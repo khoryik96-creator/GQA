@@ -130,6 +130,24 @@ jobs:
           ).read()
           assert screenshot[:8] == b"\x89PNG\r\n\x1a\n", "Screenshot is not PNG"
 
+          # v0.12: same reviewed smoke plan + same origin is one scenario.
+          repeated = request(f"/api/projects/{project_id}/runs", {
+              "plan_id":plan["id"],"target_url":"http://fixture:8081"
+          })
+          assert repeated["status"]=="passed"
+          with urllib.request.urlopen(BASE+f"/api/projects/{project_id}/quality") as response:
+              quality=json.load(response)
+          assert quality["sample_runs"]>=2, quality
+          assert quality["scenarios"]>=1, quality
+          same_smoke=[case for case in quality["cases"]
+              if case["kind"]=="smoke" and case["target_url"]=="http://fixture:8081"]
+          assert len(same_smoke)==1, quality
+          assert same_smoke[0]["observations"]==2, same_smoke
+          assert same_smoke[0]["transition"]=="stable_pass", same_smoke
+          assert same_smoke[0]["previous_run_id"]==run["id"]
+          assert same_smoke[0]["latest_run_id"]==repeated["id"]
+          assert quality["regressions"]==0
+
           production_plan = request(f"/api/projects/{project_id}/plans", {
               "prompt": "Test API and login regression with safe smoke checks",
               "environment": "production"
@@ -351,12 +369,17 @@ jobs:
           },code=403,method="POST")
           should_deny(qa_opener, f"/api/projects/{project_id}/members",code=403)
           assert as_user(qa_opener,f"/api/projects/{project_id}/plans")
+          qa_quality=as_user(qa_opener,f"/api/projects/{project_id}/quality")
+          assert qa_quality["scenarios"]>=1
+          should_deny(qa_opener,f"/api/projects/{other_id}/quality",code=404)
 
           # Reviewer assigned only to other project; even screenshot URL is scoped.
           reviewer_projects = as_user(reviewer_opener,"/api/projects")
           assert len(reviewer_projects)==1
           assert reviewer_projects[0]["id"]==other_id
           should_deny(reviewer_opener,f"/api/projects/{project_id}/plans",code=404)
+          should_deny(reviewer_opener,f"/api/projects/{project_id}/quality",code=404)
+          assert as_user(reviewer_opener,f"/api/projects/{other_id}/quality")["scenarios"]==0
           should_deny(reviewer_opener,
               f"/api/runs/{run['id']}/screenshot",code=404)
           should_deny(reviewer_opener,f"/api/projects/{other_id}/plans",{
@@ -369,6 +392,7 @@ jobs:
               "email":"review.ci@example.test","role":"reviewer"
           })
           assert as_user(reviewer_opener,f"/api/projects/{project_id}/runs")
+          assert as_user(reviewer_opener,f"/api/projects/{project_id}/quality")["scenarios"]>=1
           should_deny(reviewer_opener,f"/api/projects/{project_id}/memories",{
               "kind":"requirement","content":"This write must be denied."
           },code=403,method="POST")

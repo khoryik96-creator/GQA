@@ -1,6 +1,6 @@
 # GQA — AI Principal QA Command Center
 
-**Release candidate:** v0.11 RC1 · **Status:** local developer prototype · **Production readiness:** not yet approved
+**Current main:** v0.11 local prototype · **Development:** v0.12 Regression Intelligence · **Production readiness:** not approved
 
 GQA is a project-aware quality assurance command center built with a Go REST
 API, PostgreSQL, a Next.js/TypeScript dashboard and isolated Node/Playwright
@@ -40,7 +40,7 @@ sufficient memory to start PostgreSQL, Next.js, Go and Chromium containers.
 Windows PowerShell commands:
 
 ```powershell
-git clone -b release/gqa-v011-rc1 https://github.com/khoryik96-creator/GQA.git
+git clone https://github.com/khoryik96-creator/GQA.git
 cd GQA
 Copy-Item .env.example .env
 notepad .env
@@ -90,6 +90,23 @@ The Go API is at **http://localhost:8080** (loopback only).
 
 Production and high-impact plans cannot execute active tests in this build.
 A real application failure is never automatically marked as passing.
+
+## v0.12 — Regression Intelligence (draft feature branch)
+
+The **Regression Insights** tab groups completed runs of the **same smoke
+plan or immutable browser flow against the same target origin**. It compares
+the latest two recorded results and distinguishes newly observed failures,
+pass-to-fail regressions, repeated failures, recovered checks and stable runs.
+
+A 200-run window is used. When older results were excluded, a truncation
+warning is displayed. Recent alternating outcomes are marked as *outcome
+switching*, not diagnosed as confirmed test flakiness. A changed/repaired
+flow has its own baseline; it is not automatically counted as recovery of
+a different flow. GQA never changes expected assertions from analytics
+and never executes additional tests to produce the report.
+
+The endpoint `GET /api/projects/{id}/quality` is read-only and uses the
+same server-side project role restrictions as other project history.
 
 ## Team roles and account security
 
@@ -150,11 +167,11 @@ GitHub Actions workflows cover the foundation, Docker integration
 and experimental disposable-container integration. A passing CI run is
 not a security certification or approval to deploy customer-facing GQA.
 
-The project is under active development, and **PRs #1–#11 are individual
-feature-review milestones**. The consolidated release candidate is
-[PR #12](https://github.com/khoryik96-creator/GQA/pull/12) targeting
-`main`. It is intentionally a draft and does not automatically publish
-or deploy anything.
+GQA v0.11 was consolidated into `main` through
+[merged PR #12](https://github.com/khoryik96-creator/GQA/pull/12).
+Further development is reviewed separately; the v0.12 regression analytics
+implementation is a [draft PR #13](https://github.com/khoryik96-creator/GQA/pull/13)
+and has not been merged.
 
 ## Documentation
 
