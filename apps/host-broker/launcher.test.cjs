@@ -111,3 +111,13 @@ test("Docker cleanup failure is never reported as successful",async()=>{
  assert.equal(result.checks[0].status,"failed");
  assert.equal(result.evidence.failure_kind,"worker_cleanup_failed");
 });
+
+test("invalid output plus failed cleanup is classified as unsafe cleanup",async()=>{
+ const run=async(_,args)=>{
+  if(args[0]==="run")return {stdout:"garbage\\nbad",stderr:""};
+  throw Object.assign(new Error("docker offline"),{stderr:"Cannot connect to Docker daemon"});
+ };
+ const result=await executeJob(smoke,{run});
+ assert.equal(result.checks[0].status,"failed");
+ assert.equal(result.evidence.failure_kind,"worker_cleanup_failed");
+});

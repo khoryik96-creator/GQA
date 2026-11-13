@@ -53,6 +53,9 @@ const server = http.createServer((req, res) => {
       typeof input.run_web !== "boolean" || (!input.run_api && !input.run_web))) {
       return send(res, 400, {error:"Invalid smoke request"});
     }
+    // Claim the execution slot at the moment the complete, validated body
+    // arrives. The earlier busy check alone races with concurrent uploads.
+    if (running) return send(res,429,{error:"Runner busy"});
     running = true;
     try {
       const result = await runIsolatedJob({

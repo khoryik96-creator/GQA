@@ -83,8 +83,11 @@ async function executeJob(job,{project="gqa",run=exec,timeoutMs=55000,
     const answer=await run("docker",args,{timeout:timeoutMs,maxBuffer:2200000,
       windowsHide:true,killSignal:"SIGKILL",signal,env:dockerClientEnv(process.env)});
     const output=answer.stdout.trim();
-    if (output.length>1950000 || output.includes("\n")) return failure("invalid_worker_result",id);
-    result=validateResult(JSON.parse(output),id);
+    if (output.length>1950000 || output.includes("\n")) {
+      result=failure("invalid_worker_result",id);
+    } else {
+      result=validateResult(JSON.parse(output),id);
+    }
   } catch (err) {
     result=failure(signal?.aborted?"worker_cancelled":
       err.killed || err.signal==="SIGKILL"?"worker_timeout":"worker_error",id);

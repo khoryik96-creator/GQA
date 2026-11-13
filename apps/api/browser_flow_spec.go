@@ -74,6 +74,11 @@ func validBrowserActions(actions []BrowserAction) error {
     if strings.HasPrefix(a.Op,"assert_"){assertions++}
   }
   if assertions==0 {return errors.New("browser flow must have at least one assertion")}
+  // A passing action is not evidence that the application's postcondition holds.
+  // The final step must verify state after all clicks and field changes.
+  if !strings.HasPrefix(actions[len(actions)-1].Op,"assert_"){
+    return errors.New("browser flow must finish with a postcondition assertion")
+  }
   return nil
 }
 

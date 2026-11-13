@@ -12,6 +12,7 @@ function safePath(value) {
 function validateFlow(steps) {
   if (!Array.isArray(steps) || steps.length < 2 || steps.length > 8) return false;
   if (!steps.some(s => s && ["assert_text", "assert_visible_role", "assert_url_path"].includes(s.op))) return false;
+  if (!steps.at(-1)?.op?.startsWith("assert_")) return false;
   if (steps[0]?.op !== "navigate") return false;
   for (const s of steps) {
     if (!s || typeof s !== "object" || Array.isArray(s)) return false;

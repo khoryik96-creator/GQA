@@ -32,3 +32,8 @@ test("rejects dangerous paths", () => {
   assert.equal(safePath("/"), true);
   assert.equal(safePath("/docs"), true);
 });
+
+test("rejects an unverified action after the final assertion",()=>{
+ assert.equal(validateFlow([...valid,{op:"click_role",role:"button",name:"Show details"}]),false);
+ assert.equal(validateFlow([...valid,{op:"fill_label",label:"Email",value:"qa@example.test"}]),false);
+});

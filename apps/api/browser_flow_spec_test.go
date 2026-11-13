@@ -45,3 +45,11 @@ func TestModelBrowserFlowProvider(t *testing.T){
   if err!=nil{t.Fatal(err)}
   if result.GenerationMode!="model"||len(result.Steps)!=2{t.Fatalf("bad model draft: %#v",result)}
 }
+
+func TestFlowRequiresPostconditionAfterFinalAction(t *testing.T){
+  flow:=[]BrowserAction{{Op:"navigate",Path:"/"},{Op:"assert_text",Text:"Home"},
+    {Op:"click_role",Role:"button",Name:"Show details"}}
+  if validBrowserActions(flow)==nil{t.Fatal("click without subsequent assertion accepted")}
+  flow=append(flow,BrowserAction{Op:"assert_text",Text:"Details shown"})
+  if err:=validBrowserActions(flow);err!=nil{t.Fatal(err)}
+}
