@@ -210,6 +210,19 @@ automatic schema rollback: restore matching backed-up data and code revisions,
 or use a tested forward recovery procedure. See
 [Database Migration and Recovery Guide](docs/DATABASE_MIGRATIONS.md).
 
+## v0.14 — Reproducible dependency builds and supply-chain checks
+
+The web and Playwright runner now commit their npm lockfiles, and the Go API
+commits `go.sum`. Container builds and CI use locked installs (`npm ci`,
+`go mod download`, `go mod verify`, `go build -mod=readonly`). The
+separate container supply-chain workflow builds API, runner, and web images,
+scans for fixable **critical** vulnerabilities, and uploads an SPDX JSON
+software bill of materials for each image. See
+[Supply Chain and Dependency Policy](docs/SUPPLY_CHAIN.md).
+
+These measures improve repeatability and visibility but **do not** sign images,
+pin every container base digest, or certify external-customer deployment.
+
 ## Development and verification
 
 | Component | Command |

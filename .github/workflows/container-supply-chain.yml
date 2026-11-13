@@ -1,0 +1,45 @@
+name: GQA Container Supply Chain Verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 4 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image-security:
+    name: "Build, scan and inventory ${{ matrix.component }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [api, runner, web]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned-component source image
+        run: |
+          docker build -t "gqa-${{ matrix.component }}:security-ci" "./apps/${{ matrix.component }}"
+      - name: Scan image for fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: "gqa-${{ matrix.component }}:security-ci"
+          format: table
+          exit-code: "1"
+          severity: CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+          scanners: vuln
+          timeout: "8m"
+      - name: Produce component software bill of materials
+        uses: anchore/sbom-action@v0
+        with:
+          image: "gqa-${{ matrix.component }}:security-ci"
+          format: spdx-json
+          artifact-name: "gqa-${{ matrix.component }}-sbom.spdx.json"

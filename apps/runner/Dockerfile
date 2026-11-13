@@ -1,7 +1,7 @@
 FROM mcr.microsoft.com/playwright:v1.65.0-noble
 WORKDIR /worker
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY index.cjs ./index.cjs
 COPY policy.cjs ./policy.cjs
 COPY browser-flow.cjs ./browser-flow.cjs
