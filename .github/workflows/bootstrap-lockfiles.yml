@@ -1,0 +1,46 @@
+name: Bootstrap reproducible dependency lockfiles
+
+# Temporary branch-scoped helper. Remove this workflow after committing locks.
+on:
+  push:
+    branches:
+      - fix/v014-reproducible-dependency-locks
+
+permissions:
+  contents: write
+
+jobs:
+  generate-locks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - name: Generate npm lockfiles from real package manifests
+        run: |
+          cd apps/web && npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          cd ../runner && npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Generate go.sum from verified Go module downloads
+        working-directory: apps/api
+        run: |
+          go mod tidy
+          go mod verify
+      - name: Commit generated dependency locks into feature branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/package-lock.json apps/runner/package-lock.json apps/api/go.mod apps/api/go.sum
+          if git diff --cached --quiet; then
+            echo "Dependency locks already up to date"
+          else
+            git commit -m "build: commit npm and Go dependency lockfiles"
+            git push origin HEAD:fix/v014-reproducible-dependency-locks
+          fi
