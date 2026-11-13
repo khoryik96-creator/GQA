@@ -37,7 +37,7 @@ type Plan = {
   status: string; created_at: string;
 };
 type SmokeCheck = { name: string; status: string; duration_ms: number; detail: string };
-type TestRun = { id: string; project_id: string; plan_id: string; target_url: string; status: string; checks: SmokeCheck[]; screenshot_available: boolean; started_at: string; finished_at: string | null; evidence?: {failure_kind?: string;worker_lifecycle?: string;job_id?: string} };
+type TestRun = { id: string; project_id: string; plan_id: string; target_url: string; status: string; checks: SmokeCheck[]; screenshot_available: boolean; started_at: string; finished_at: string | null; flow_id?: string; execution_kind?: string; evidence?: {failure_kind?: string;worker_lifecycle?: string;job_id?: string} };
 type Memory = {
   id: string; project_id: string; kind: MemoryKind; content: string;
   source: string; status: string; supersedes_id: string; created_at: string;
@@ -114,6 +114,8 @@ export default function CommandCenter() {
   const [supersedesId, setSupersedesId] = useState("");
   const [memorySearch, setMemorySearch] = useState("");
   const [loadingProjects, setLoadingProjects] = useState(true);
+  const [loadingOverview, setLoadingOverview] = useState(false);
+  const [overviewRevision, setOverviewRevision] = useState(0);
 
   const selected = useMemo(() => projects.find(p => p.id === selectedId), [projects, selectedId]);
   const latest = plans[0];
@@ -158,24 +160,43 @@ export default function CommandCenter() {
   }, [authStatus]);
 
   useEffect(() => {
-    if (!selectedId) return;
-    let cancelled = false;
+    // Cancel outgoing project requests; a slow or failed endpoint must not
+    // discard successful, independently useful project data.
+    const controller = new AbortController();
+    if (!selectedId || authStatus !== "authenticated") {
+      setLoadingOverview(false);
+      return () => controller.abort();
+    }
+    const requestedProject = selectedId;
+    setLoadingOverview(true);
+    setError("");
     setPlans([]);
     setMemories([]);
     setRuns([]);
     setInspection(null);
-    Promise.all([
-      call<Plan[]>("/api/projects/" + selectedId + "/plans"),
-      call<Memory[]>("/api/projects/" + selectedId + "/memories"),
-      call<TestRun[]>("/api/projects/" + selectedId + "/runs")
-    ]).then(([newPlans, newMemories, newRuns]) => {
-      if (!cancelled) {
-        setPlans(newPlans); setMemories(newMemories); setRuns(newRuns);
-        if (newPlans[0]?.repository_evidence?.repository) setInspection(newPlans[0].repository_evidence);
+    const prefix = "/api/projects/" + requestedProject;
+    Promise.allSettled([
+      call<Plan[]>(prefix + "/plans", { signal: controller.signal }),
+      call<Memory[]>(prefix + "/memories", { signal: controller.signal }),
+      call<TestRun[]>(prefix + "/runs", { signal: controller.signal })
+    ]).then(results => {
+      if (controller.signal.aborted || !isCurrentProject(requestedProject)) return;
+      const [plansResult, memoriesResult, runsResult] = results;
+      if (plansResult.status === "fulfilled") {
+        setPlans(plansResult.value);
+        const snapshot = plansResult.value[0]?.repository_evidence;
+        if (snapshot?.repository) setInspection(snapshot);
       }
-    }).catch(err => { if (!cancelled) setError(err.message); });
-    return () => { cancelled = true; };
-  }, [selectedId]);
+      if (memoriesResult.status === "fulfilled") setMemories(memoriesResult.value);
+      if (runsResult.status === "fulfilled") setRuns(runsResult.value);
+      const failed = results.flatMap((result, i) => result.status === "rejected"
+        ? [["QA plans", "project memory", "test runs"][i]] : []);
+      if (failed.length) setError("Unable to load " + failed.join(", ") + ". Other project data remains available.");
+    }).finally(() => {
+      if (!controller.signal.aborted && isCurrentProject(requestedProject)) setLoadingOverview(false);
+    });
+    return () => controller.abort();
+  }, [selectedId, authStatus, overviewRevision]);
 
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
@@ -394,6 +415,9 @@ export default function CommandCenter() {
           {securityOpen && account && <AccountSecurity apiBase={API} email={account.email}
             onClose={()=>setSecurityOpen(false)} onSignedOut={clearSessionUI}/>}
           {error && <div className="error-banner"><AlertTriangle size={17}/><span>{error}</span><button onClick={() => setError("")} title="Dismiss"><X size={16}/></button></div>}
+          {selected && loadingOverview && <p className="muted small" role="status">Loading project plans, memories and recent runs…</p>}
+          {selected && error.startsWith("Unable to load ") && !loadingOverview &&
+            <button className="button secondary" type="button" onClick={() => setOverviewRevision(n => n + 1)}>Retry project data</button>}
 
           {showCreate && isAdmin && (
             <section className="card modal-card">
@@ -472,6 +496,11 @@ export default function CommandCenter() {
                       canRun={canQA && !!latest && !latest.approval_required && latest.environment !== "production" &&
                         latest.selected_agents.some(a => a.id === "web")}
                       apiBase={API}
+                      runs={runs}
+                      onRunRecorded={run => {
+                        if (isCurrentProject(selected.id)) setRuns(current =>
+                          [run, ...current.filter(previous => previous.id !== run.id)]);
+                      }}
                     />
                     <section className="card">
                       <div className="card-head"><div><h2><Activity size={18}/> Read-only smoke execution</h2><p>Real API and Playwright checks in a separate local Docker runner.</p></div><span className="pill neutral">Approved targets</span></div>
