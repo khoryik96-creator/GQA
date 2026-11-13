@@ -371,7 +371,7 @@ export default function CommandCenter() {
           {loadingProjects && <span className="muted small">Loading projects…</span>}
         </div>
         <div className="sidebar-footer">
-          <div className="status-dot"/><span>GQA v0.12</span>
+          <div className="status-dot"/><span>GQA · Local QA</span>
           <small>{account?.email} · {account?.global_role}</small>
         </div>
       </aside>

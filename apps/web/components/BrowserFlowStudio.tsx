@@ -179,7 +179,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
           <h2><WandSparkles size={18}/> Browser Flow Studio</h2>
           <p>Turn a natural-language request into a reviewed Playwright action sequence.</p>
         </div>
-        <span className="pill neutral">v0.5 · repair memory</span>
+        <span className="pill neutral">Reviewed browser actions</span>
       </div>
       {!hasWeb && <div className="notice">
         <ShieldAlert size={17}/>
