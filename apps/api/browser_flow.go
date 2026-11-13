@@ -203,7 +203,7 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
   body,_:=json.Marshal(map[string]any{"target_url":input.TargetURL,"steps":flow.Steps})
   endpoint:=os.Getenv("GQA_RUNNER_FLOW_URL")
   if endpoint==""{endpoint="http://runner:8090/flow"}
-  ctx,cancel:=context.WithTimeout(r.Context(),60*time.Second)
+  ctx,cancel:=context.WithTimeout(context.Background(),80*time.Second)
   defer cancel()
   reply:=workerReply{Checks:[]SmokeCheck{}}
   req,err:=http.NewRequestWithContext(ctx,http.MethodPost,endpoint,bytes.NewReader(body))
@@ -211,7 +211,7 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
     req.Header.Set("Content-Type","application/json")
     req.Header.Set("X-GQA-Runner-Token",os.Getenv("GQA_RUNNER_TOKEN"))
     var resp *http.Response
-    resp,err=(&http.Client{Timeout:60*time.Second}).Do(req)
+    resp,err=(&http.Client{Timeout:75*time.Second,CheckRedirect:func(*http.Request,[]*http.Request)error{return http.ErrUseLastResponse}}).Do(req)
     if err==nil{
       defer resp.Body.Close()
       if resp.StatusCode==200{
@@ -221,13 +221,14 @@ func (s *server) executeBrowserFlow(w http.ResponseWriter,r *http.Request){
       }
     }
   }
-  if err!=nil{
-    reply=workerReply{Checks:[]SmokeCheck{{
-      Name:"Browser runner availability",Status:"failed",
-      Detail:"Runner was unavailable or returned unusable evidence",
-    }}}
-  }
-  if err:=persistFlowEvidence(r.Context(),s,&run,reply);err!=nil{
+  if err!=nil {
+     reply=recordedRunnerFailure("Browser runner availability")
+   }else if !validatedFlowChecks(reply.Checks,flow.Steps){
+     reply=invalidEvidence()
+   }
+   finalCtx,finishCancel:=context.WithTimeout(context.Background(),10*time.Second)
+   defer finishCancel()
+   if err:=persistFlowEvidence(finalCtx,s,&run,reply);err!=nil{
     fail(w,500,"Browser run finished but results could not be saved");return
   }
   writeJSON(w,201,run)
