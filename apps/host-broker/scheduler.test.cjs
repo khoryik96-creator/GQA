@@ -197,3 +197,17 @@ test("asynchronous jobs keep sanitized result evidence after completion",async t
  await restored.start();
  assert.equal(restored.getResult(job.id).checks[0].status,"passed");
 });
+
+test("journal disk failure cannot leave phantom in-memory jobs",t=>{
+ const dir=temp(t),store=new JobStore(dir);
+ store.load();
+ const persist=store.save.bind(store);
+ store.save=()=>{throw Error("disk unavailable")};
+ assert.throws(()=>store.create(spec),/disk unavailable/);
+ assert.equal(store.jobs.length,0);
+ store.save=persist;
+ const job=store.create(spec);
+ store.save=()=>{throw Error("disk unavailable")};
+ assert.throws(()=>store.transition(job.id,{status:"passed"}),/disk unavailable/);
+ assert.equal(store.get(job.id).status,"queued");
+});
