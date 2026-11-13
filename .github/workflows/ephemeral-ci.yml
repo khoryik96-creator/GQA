@@ -167,6 +167,37 @@ jobs:
               raise AssertionError("Asynchronous job never reached terminal status")
           assert tracked["status"]=="passed",tracked
           assert tracked["check_count"]>=1,tracked
+          assert tracked["result_checks"][0]["status"]=="passed"
+
+          # A second asynchronous browser test must persist an accessible
+          # screenshot without storing its base64 data in the JSON journal.
+          _,visual=call("/jobs",{
+              "kind":"smoke","target_url":"http://fixture:8081",
+              "run_api":False,"run_web":True})
+          for _ in range(80):
+              _,visual_state=call("/jobs/"+visual["id"])
+              if visual_state["status"] in ("passed","failed","cancelled","interrupted"):break
+              time.sleep(0.5)
+          else:
+              raise AssertionError("Browser evidence job did not complete")
+          assert visual_state["status"]=="passed" and visual_state["screenshot_available"],visual_state
+          import http.cookiejar
+          jar=http.cookiejar.CookieJar()
+          opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+          with open(".env",encoding="utf-8") as envstream:
+              admin_password=next(line.split("=",1)[1].strip() for line in envstream
+                  if line.startswith("GQA_ADMIN_PASSWORD="))
+          login=urllib.request.Request("http://127.0.0.1:8080/api/auth/login",
+              data=json.dumps({"email":"admin@gqa.local","password":admin_password}).encode(),
+              method="POST",headers={"Origin":"http://localhost:3000",
+                  "Content-Type":"application/json"})
+          with opener.open(login,timeout=10) as res:
+              assert json.load(res)["authenticated"]
+          with opener.open("http://127.0.0.1:8080/api/admin/broker-jobs/"+
+              visual["id"]+"/screenshot",timeout=10) as res:
+              assert res.headers["Content-Type"]=="image/png"
+              assert res.read(8)==bytes([137,80,78,71,13,10,26,10])
+          print("PASS: admin-only durable screenshot evidence")
 
           assert os.path.isfile(".gqa-broker-state/jobs.json")
           with open(".gqa-broker-state/jobs.json",encoding="utf-8") as f:
