@@ -97,6 +97,9 @@ async function checkRole(role, projectA, projectB, email) {
     await page.unroute("**/api/projects/" + projectA.id + "/memories?limit=25");
     await page.getByRole("button", { name: "Retry project data" }).click();
     await page.getByRole("button", { name: "Retry project data" }).waitFor({ state: "detached", timeout: 15000 });
+    // Reload resets the dashboard to the QA Command tab; return to Memory
+    // after recovery rather than assuming the previous tab was persisted.
+    await page.getByRole("button", { name: /Project Memory/ }).click();
     await page.getByRole("heading", { name: "Persistent project memory" }).waitFor();
     records.push("failed memory GET preserves session and recovers via explicit retry");
   }
