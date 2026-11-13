@@ -47,6 +47,7 @@ type Memory = {
   id: string; project_id: string; kind: MemoryKind; content: string;
   source: string; status: string; supersedes_id: string; created_at: string;
 };
+type MemoryPage = { items: Memory[]; next_cursor: string };
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 const icons: Record<string, LucideIcon> = {
@@ -118,6 +119,10 @@ export default function CommandCenter() {
   const [memoryText, setMemoryText] = useState("");
   const [supersedesId, setSupersedesId] = useState("");
   const [memorySearch, setMemorySearch] = useState("");
+  const [activeMemoryQuery, setActiveMemoryQuery] = useState("");
+  const [memoryNextCursor, setMemoryNextCursor] = useState("");
+  const [loadingMemories, setLoadingMemories] = useState(false);
+  const memoryRequestVersion = useRef(0);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [loadingOverview, setLoadingOverview] = useState(false);
   const [overviewRevision, setOverviewRevision] = useState(0);
@@ -179,10 +184,13 @@ export default function CommandCenter() {
     setMemories([]);
     setRuns([]);
     setInspection(null);
+    setMemoryNextCursor("");
+    setActiveMemoryQuery("");
+    const memoryVersion = ++memoryRequestVersion.current;
     const prefix = "/api/projects/" + requestedProject;
     Promise.allSettled([
       call<Plan[]>(prefix + "/plans", { signal: controller.signal }),
-      call<Memory[]>(prefix + "/memories", { signal: controller.signal }),
+      call<MemoryPage>(prefix + "/memories?limit=25", { signal: controller.signal }),
       call<TestRun[]>(prefix + "/runs", { signal: controller.signal })
     ]).then(results => {
       if (controller.signal.aborted || !isCurrentProject(requestedProject)) return;
@@ -192,7 +200,10 @@ export default function CommandCenter() {
         const snapshot = plansResult.value[0]?.repository_evidence;
         if (snapshot?.repository) setInspection(snapshot);
       }
-      if (memoriesResult.status === "fulfilled") setMemories(memoriesResult.value);
+      if (memoriesResult.status === "fulfilled" && memoryRequestVersion.current === memoryVersion) {
+        setMemories(memoriesResult.value.items);
+        setMemoryNextCursor(memoriesResult.value.next_cursor);
+      }
       if (runsResult.status === "fulfilled") setRuns(runsResult.value);
       const failed = results.flatMap((result, i) => result.status === "rejected"
         ? [["QA plans", "project memory", "test runs"][i]] : []);
@@ -209,7 +220,9 @@ export default function CommandCenter() {
     // Clear project-scoped records and pending memory corrections in the same
     // React update as selection, before another project's panel can render.
     selectedProjectRef.current = id;
+    memoryRequestVersion.current++;
     setPlans([]); setMemories([]); setRuns([]); setInspection(null);
+    setMemoryNextCursor(""); setActiveMemoryQuery(""); setLoadingMemories(false);
     setMemoryText(""); setSupersedesId(""); setMemorySearch("");
     setError(""); setView("command");
     setSelectedId(id);
@@ -338,13 +351,49 @@ export default function CommandCenter() {
 
   async function searchMemories(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedId) return;
+    if (!selectedId || loadingMemories) return;
     const requestedProject=selectedId;
-    setError("");
+    const query=memorySearch.trim();
+    const version=++memoryRequestVersion.current;
+    setLoadingMemories(true);setError("");setMemoryNextCursor("");
     try {
-      const result = await call<Memory[]>("/api/projects/" + selectedId + "/memories?q=" + encodeURIComponent(memorySearch));
-      if(isCurrentProject(requestedProject))setMemories(result);
-    } catch (err) { if(isCurrentProject(requestedProject))setError((err as Error).message); }
+      const page=await call<MemoryPage>("/api/projects/"+requestedProject+
+        "/memories?limit=25&q="+encodeURIComponent(query));
+      if(isCurrentProject(requestedProject)&&memoryRequestVersion.current===version){
+        setActiveMemoryQuery(query);
+        setMemories(page.items);setMemoryNextCursor(page.next_cursor);
+      }
+    }catch(err){
+      if(isCurrentProject(requestedProject)&&memoryRequestVersion.current===version)
+        setError((err as Error).message);
+    }finally{
+      if(isCurrentProject(requestedProject)&&memoryRequestVersion.current===version)
+        setLoadingMemories(false);
+    }
+  }
+  async function loadMoreMemories(){
+    if(!selectedId||!memoryNextCursor||loadingMemories)return;
+    const requestedProject=selectedId;
+    const version=++memoryRequestVersion.current;
+    setLoadingMemories(true);setError("");
+    try{
+      const page=await call<MemoryPage>("/api/projects/"+requestedProject+
+        "/memories?limit=25&q="+encodeURIComponent(activeMemoryQuery)+
+        "&cursor="+encodeURIComponent(memoryNextCursor));
+      if(isCurrentProject(requestedProject)&&memoryRequestVersion.current===version){
+        setMemories(previous=>{
+          const existing=new Set(previous.map(m=>m.id));
+          return [...previous,...page.items.filter(m=>!existing.has(m.id))];
+        });
+        setMemoryNextCursor(page.next_cursor);
+      }
+    }catch(err){
+      if(isCurrentProject(requestedProject)&&memoryRequestVersion.current===version)
+        setError((err as Error).message);
+    }finally{
+      if(isCurrentProject(requestedProject)&&memoryRequestVersion.current===version)
+        setLoadingMemories(false);
+    }
   }
 
   function correctMemory(memory: Memory) {
@@ -573,6 +622,11 @@ export default function CommandCenter() {
                       {memories.length === 0 && <div className="memory-empty">No memory records found. Add the first project fact or correction.</div>}
                       {memories.map(m => <div className={"memory-item " + (m.status === "superseded" ? "superseded" : "")} key={m.id}><div className="memory-meta"><span className="pill neutral">{m.kind}</span><span>{when(m.created_at)}</span><span className={m.status === "confirmed" ? "memory-confirmed" : "memory-obsolete"}>{m.status}</span></div><p>{m.content}</p><div className="memory-actions"><span>Source: {m.source}</span>{m.status === "confirmed" && canQA && <button className="text-button" onClick={() => correctMemory(m)}>Correct / supersede <ArrowRight size={13}/></button>}</div></div>)}
                     </div>
+                    {memoryNextCursor && <button className="button secondary" type="button"
+                      onClick={loadMoreMemories} disabled={loadingMemories}>
+                      {loadingMemories ? "Loading more…" : "Load 25 more memories"}
+                    </button>}
+                    {loadingMemories && <p className="muted small" role="status">Loading project memories…</p>}
                   </section>
                   {canQA && <section className="card memory-editor"><div className="card-head"><div><h2><Plus size={18}/> {supersedesId ? "Correct existing memory" : "Add project knowledge"}</h2><p>Human-confirmed knowledge is stored with provenance.</p></div></div>
                     <form onSubmit={saveMemory}>
