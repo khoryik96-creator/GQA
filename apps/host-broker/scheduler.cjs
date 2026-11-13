@@ -40,11 +40,23 @@ class Scheduler {
   }
   list(){return this.store.list().map(j=>({...publicJob(j),result_available:this.results.exists(j.id)}))}
   hasInFlight(){return this.store.pending().length>0}
-  enqueue(spec){
+  enqueue(spec,key){
     if(!this.ready)throw Object.assign(new Error("Broker recovery incomplete"),{status:503});
+    // Retries resolve BEFORE checking capacity: a full queue must not reject
+    // a request which has already been durably accepted.
+    const previous=this.store.findIdempotent(spec,key);
+    if(previous)return publicJob(previous);
     if(this.store.pending().length>=this.capacity)
       throw Object.assign(new Error("Job queue capacity reached"),{status:429});
-    const item=this.store.create(spec);
+    let item;
+    try{item=this.store.create(spec,key)}
+    catch(err){
+      // A journal fsync or directory-sync failure may occur after atomic
+      // rename. The request outcome is ambiguous: disable new acceptance
+      // until a restart reloads the journal and resolves the original key.
+      this.ready=false;
+      throw Object.assign(new Error("Durable job acceptance unavailable; restart and retry with the same key"),{status:503});
+    }
     this.pump();
     return publicJob(item);
   }
