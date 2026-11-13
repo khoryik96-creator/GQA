@@ -93,6 +93,21 @@ class JobStore {
     } finally {
       if(fs.existsSync(temp))fs.unlinkSync(temp);
     }
+    // Limit local screenshot retention to evidence for jobs still in the
+    // bounded journal. Never follow symlinks or delete non-GQA files.
+    this.pruneScreenshots();
+  }
+  pruneScreenshots(){
+    if(!fs.existsSync(this.evidenceDir))return;
+    if(fs.lstatSync(this.evidenceDir).isSymbolicLink())throw Error("Unsafe evidence directory");
+    const valid=new Set(this.jobs.map(j=>j.id+".png"));
+    for(const name of fs.readdirSync(this.evidenceDir)){
+      if(!/^[a-f0-9-]{36}\.png$/.test(name)||valid.has(name))continue;
+      const target=path.join(this.evidenceDir,name);
+      try{
+        if(fs.lstatSync(target).isFile())fs.unlinkSync(target);
+      }catch{ /* cleanup will be retried on the next journal write */ }
+    }
   }
   get(id){return this.jobs.find(j=>j.id===id)}
   persistScreenshot(id,raw){
@@ -104,6 +119,7 @@ class JobStore {
       !image.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))
       throw Error("Invalid screenshot bytes");
     fs.mkdirSync(this.evidenceDir,{recursive:true,mode:0o700});
+    if(fs.lstatSync(this.evidenceDir).isSymbolicLink())throw Error("Unsafe evidence directory");
     fs.writeFileSync(path.join(this.evidenceDir,id+".png"),image,{flag:"wx",mode:0o600});
     return true;
   }
