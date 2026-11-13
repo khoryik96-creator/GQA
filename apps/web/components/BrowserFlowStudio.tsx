@@ -216,7 +216,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
         </button>
       </form>
 
-      {error && <div className="browser-flow-error"><AlertTriangle size={16}/>{error}</div>}
+      {error && <div className="browser-flow-error" role="alert"><AlertTriangle size={16}/>{error}</div>}
       {flowNextCursor&&<button className="button secondary" type="button" disabled={loadingOlderFlows}
         onClick={loadOlderFlows}>{loadingOlderFlows?"Loading older flows…":"Load older browser flows"}</button>}
       {visible.length>0 && <div className="browser-flow-review">
@@ -261,7 +261,7 @@ export default function BrowserFlowStudio({ projectId, planId, canRun, canDraft,
             {!canRun && <p className="fine-print">Execution blocked: this plan is missing Web QA or requires restricted-environment approval.</p>}
           </div>
         </>}
-        {latestRun && <div className="browser-flow-result">
+        {latestRun && <div className="browser-flow-result" aria-live="polite">
           <div className="run-heading"><strong><ClipboardCheck size={16}/> Browser flow results</strong>
             <span className={"pill " + (latestRun.status==="passed" ? "" : "warning")}>{latestRun.status}</span>
           </div>
