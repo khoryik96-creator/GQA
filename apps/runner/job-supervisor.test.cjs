@@ -36,3 +36,25 @@ test("hanging job is forcibly bounded and explicitly failed", async () => {
   assert.equal(result.checks[0].status,"failed");
   assert.equal(result.evidence.failure_kind,"worker_timeout");
 });
+
+test("client abort kills a previously spawned hanging one-shot worker", async () => {
+  const controller = new AbortController();
+  const script = path.join(__dirname, "fixtures", "hanging-job.cjs");
+  const pending = runIsolatedJob({kind:"hang"}, {
+    script, timeoutMs:3000, signal:controller.signal
+  });
+  setTimeout(() => controller.abort(), 120);
+  const result = await pending;
+  assert.equal(result.checks[0].status, "failed");
+  assert.equal(result.evidence.failure_kind, "worker_cancelled");
+});
+
+test("pre-aborted worker request fails without spawning a child", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const result = await runIsolatedJob({kind:"aborted"}, {
+    script:"does-not-exist.cjs", timeoutMs:500, signal:controller.signal
+  });
+  assert.equal(result.evidence.failure_kind, "worker_cancelled");
+  assert.equal(result.checks[0].status, "failed");
+});
