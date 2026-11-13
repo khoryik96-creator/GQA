@@ -519,6 +519,41 @@ jobs:
           else:
               raise AssertionError("Unauthorized write origin was accepted")
 
+          # v0.15: keyset paging preserves legacy clients, search, order and
+          # project isolation even when many records share close timestamps.
+          for i in range(32):
+              request(f"/api/projects/{project_id}/memories", {
+                  "kind": "requirement",
+                  "content": f"zebrapagination record {i:03d} for cursor testing"
+              })
+          memory_path = f"/api/projects/{project_id}/memories"
+          with urllib.request.urlopen(BASE + memory_path) as response:
+              legacy_memories = json.load(response)
+          assert isinstance(legacy_memories, list), legacy_memories
+          cursor = ""
+          all_ids = []
+          for step in range(10):
+              suffix = "?limit=10&q=zebrapagination"
+              if cursor:
+                  suffix += "&cursor=" + cursor
+              with urllib.request.urlopen(BASE + memory_path + suffix) as response:
+                  page = json.load(response)
+              assert isinstance(page["items"], list) and len(page["items"]) <= 10
+              all_ids.extend(item["id"] for item in page["items"])
+              cursor = page["next_cursor"]
+              if not cursor:
+                  break
+          assert len(all_ids) == 32 and len(set(all_ids)) == 32, all_ids
+          try:
+              urllib.request.urlopen(BASE + memory_path + "?limit=10&cursor=invalid", timeout=5)
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 400
+          else:
+              raise AssertionError("Malformed memory cursor was accepted")
+          with urllib.request.urlopen(BASE + f"/api/projects/{other_id}/memories?limit=10&q=zebrapagination") as response:
+              other_page = json.load(response)
+          assert other_page["items"] == [] and other_page["next_cursor"] == ""
+
           logout = urllib.request.Request(
               BASE + "/api/auth/logout", data=b"{}", method="POST",
               headers={"Content-Type": "application/json", "Origin": FRONTEND_ORIGIN},
