@@ -20,6 +20,13 @@ check(/GQA_ADMIN_PASSWORD:\s*\$\{GQA_ADMIN_PASSWORD:\?/.test(compose),
  "compose refuses missing administrator password");
 check(/GQA_RUNNER_TOKEN:\s*\$\{GQA_RUNNER_TOKEN:\?/.test(compose),
  "compose refuses missing internal runner secret");
+check(/GQA_DB_APP_PASSWORD:\s*\$\{GQA_DB_APP_PASSWORD:\?/.test(compose) &&
+      /GQA_SCHEMA_MANAGED:\s*"true"/.test(compose) &&
+      compose.includes("postgres://gqa_app:"),
+ "API uses a non-superuser runtime database identity");
+check(/storage:\s*\n\s*internal:\s*true/.test(compose) &&
+      /migrate:\s*\n[\s\S]*?service_completed_successfully/.test(compose),
+ "PostgreSQL remains isolated behind a completed migration task");
 check(/127\.0\.0\.1:8080:8080/.test(compose) &&
       /127\.0\.0\.1:3000:3000/.test(compose),
  "API and UI are published on local loopback only");
