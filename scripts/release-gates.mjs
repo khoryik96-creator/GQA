@@ -20,7 +20,10 @@ check(/GQA_ADMIN_PASSWORD:\s*\$\{GQA_ADMIN_PASSWORD:\?/.test(compose),
  "compose refuses missing administrator password");
 check(/GQA_RUNNER_TOKEN:\s*\$\{GQA_RUNNER_TOKEN:\?/.test(compose),
  "compose refuses missing internal runner secret");
-check(/POSTGRES_PASSWORD:\s*\$\{GQA_DB_ADMIN_PASSWORD:\?/.test(compose) &&\n      /GQA_DB_ADMIN_PASSWORD:\s*\$\{GQA_DB_ADMIN_PASSWORD:\?/.test(compose) &&\n      !compose.includes("gqa_local_only") &&\n      /GQA_DB_APP_PASSWORD:\s*\$\{GQA_DB_APP_PASSWORD:\?/.test(compose) &&
+check(/POSTGRES_PASSWORD:\s*\$\{GQA_DB_ADMIN_PASSWORD:\?/.test(compose) &&
+      /GQA_DB_ADMIN_PASSWORD:\s*\$\{GQA_DB_ADMIN_PASSWORD:\?/.test(compose) &&
+      !compose.includes("gqa_local_only") &&
+      /GQA_DB_APP_PASSWORD:\s*\$\{GQA_DB_APP_PASSWORD:\?/.test(compose) &&
       /GQA_SCHEMA_MANAGED:\s*"true"/.test(compose) &&
       compose.includes("postgres://gqa_app:"),
  "Compose refuses default database-admin credentials and API uses a non-superuser identity");
