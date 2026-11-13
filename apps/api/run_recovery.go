@@ -29,3 +29,10 @@ func reconcileStaleRuns(ctx context.Context,exec sqlExecutor)error{
 func (s *server) reconcileStaleRuns(ctx context.Context)error{
  return reconcileStaleRuns(ctx,s.db)
 }
+
+func (s *server) cleanupExpiredSessions(ctx context.Context)error{
+ _,err:=s.db.Exec(ctx,`DELETE FROM auth_sessions WHERE
+   expires_at<now()-interval '30 days'
+   OR revoked_at<now()-interval '30 days'`)
+ return err
+}

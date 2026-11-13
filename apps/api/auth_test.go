@@ -50,7 +50,7 @@ func TestLoginRateLimit(t *testing.T){
  ip:="127.0.0.1"
  for i:=0;i<maxLoginFailures;i++{
   if !auth.mayAttemptLogin(ip){t.Fatalf("blocked too early at attempt %d",i)}
-  auth.recordLoginFailure(ip)
+  // Attempts are reserved under the mutex before password checking.
  }
  if auth.mayAttemptLogin(ip){t.Fatal("rate limit not enforced")}
  auth.failures[ip]=[]time.Time{time.Now().Add(-16*time.Minute)}
@@ -65,4 +65,15 @@ func TestCookieAttributes(t *testing.T){
  for _,required:=range []string{"HttpOnly","SameSite=Strict","Secure","Path=/api"}{
   if !strings.Contains(header,required){t.Fatalf("cookie missing %q: %s",required,header)}
  }
+}
+
+func TestLoginReservationsAreAtomicForConcurrentRequests(t *testing.T){
+ auth,_:=newAuthenticator(nil,"at-least-sixteen-character-password","http://localhost:3000",false)
+ const requests=100
+ accepted:=make(chan bool,requests)
+ for i:=0;i<requests;i++{go func(){accepted<-auth.mayAttemptLogin("ip|test@example.com")}()}
+ count:=0
+ for i:=0;i<requests;i++{if <-accepted{count++}}
+ if count!=maxLoginFailures{t.Fatalf("concurrent reservations allowed %d, expected %d",count,maxLoginFailures)}
+ if !auth.mayAttemptLogin("ip|other@example.com"){t.Fatal("different user incorrectly shares account bucket")}
 }
