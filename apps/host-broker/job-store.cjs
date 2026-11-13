@@ -99,13 +99,19 @@ class JobStore {
     const record={id:crypto.randomUUID(),kind:spec.kind,spec,status:"queued",
       created_at:stamp,updated_at:stamp,started_at:null,finished_at:null,
       failure_kind:"",check_count:0};
-    this.jobs.push(record);this.save();return record;
+    const before=this.jobs;
+    this.jobs=[...before,record];
+    try{this.save()}catch(err){this.jobs=before;throw err}
+    return record;
   }
   transition(id,changes){
     const item=this.get(id);
     if(!item)throw new Error("Unknown broker job");
-    Object.assign(item,changes,{updated_at:new Date().toISOString()});
-    this.save();return item;
+    const before=this.jobs;
+    const revised={...item,...changes,updated_at:new Date().toISOString()};
+    this.jobs=before.map(j=>j.id===id?revised:j);
+    try{this.save()}catch(err){this.jobs=before;throw err}
+    return revised;
   }
 }
 

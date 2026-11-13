@@ -160,3 +160,16 @@ test("only exact, bounded fixture job specs enter the journal",t=>{
  const saved=store.create(spec);
  assert.equal(saved.status,"queued");
 });
+
+test("a failed journal write rolls back in-memory changes",t=>{
+ const dir=temp(t),store=new JobStore(dir);store.load();
+ const job=store.create(spec);
+ const previous=store.jobs.map(x=>({...x}));
+ const real=store.save.bind(store);
+ store.save=()=>{throw Error("storage full")};
+ assert.throws(()=>store.transition(job.id,{status:"passed"}),/storage full/);
+ assert.equal(store.get(job.id).status,"queued");
+ assert.throws(()=>store.create(spec),/storage full/);
+ assert.deepEqual(store.jobs,previous);
+ store.save=real;
+});

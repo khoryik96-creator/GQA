@@ -70,7 +70,14 @@ class Scheduler {
     if(!next)return;
     const controller=new AbortController();
     this.current={id:next.id,controller};
-    this.store.transition(next.id,{status:"running",started_at:new Date().toISOString()});
+    try{
+      this.store.transition(next.id,{status:"running",started_at:new Date().toISOString()});
+    }catch{
+      // No worker may run unless its running state was durably recorded.
+      this.ready=false;this.current=null;
+      this.settle(next.id,failure("worker_journal_failed",next.id));
+      return;
+    }
     Promise.resolve().then(()=>this.runJob(next.spec,{
       project:this.project,signal:controller.signal,id:next.id,
       timeoutMs:next.kind==="smoke"?24000:55000
@@ -95,10 +102,16 @@ class Scheduler {
       this.settle(next.id,final);
     }).catch(()=>{
       const final=failure(controller.signal.aborted?"worker_cancelled":"worker_error",next.id);
-      this.store.transition(next.id,{status:controller.signal.aborted?"cancelled":"failed",
-        finished_at:new Date().toISOString(),failure_kind:final.evidence.failure_kind,
-        check_count:1});
-      this.settle(next.id,final);
+      try{
+        this.store.transition(next.id,{status:controller.signal.aborted?"cancelled":"failed",
+          finished_at:new Date().toISOString(),failure_kind:final.evidence.failure_kind,
+          check_count:1});
+        this.settle(next.id,final);
+      }catch{
+        // A failed journal write means we cannot assert any terminal status.
+        this.ready=false;
+        this.settle(next.id,failure("worker_journal_failed",next.id));
+      }
     }).finally(()=>{
       this.current=null;
       this.pump();

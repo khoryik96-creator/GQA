@@ -111,13 +111,19 @@ const server=http.createServer(async(req,res)=>{
   }
 });
 server.requestTimeout=70000;
-scheduler.start().then(()=>{
-  server.listen(PORT,HOST,()=>{
-    console.log("GQA broker: durable local jobs enabled on "+HOST+":"+PORT);
-  });
-}).catch(()=>{
-  // Recovery must finish before accepting new jobs: don't accidentally run
-  // queued tests while an old container might remain alive.
-  process.stderr.write("Broker could not reconcile prior jobs. Resolve Docker connectivity before restart.\n");
+// Claim the operating-system TCP listener BEFORE touching the journal or
+// starting queued jobs. A second broker on the same bind/port cannot race
+// the first broker to replay persisted work.
+server.once("error",err=>{
+  process.stderr.write("Broker endpoint unavailable: "+err.code+"\n");
   process.exitCode=1;
+});
+server.listen(PORT,HOST,()=>{
+  scheduler.start().then(()=>{
+    console.log("GQA broker: durable local jobs enabled on "+HOST+":"+PORT);
+  }).catch(()=>{
+    process.stderr.write("Broker failed to reconcile prior jobs; refusing new work.\n");
+    server.close();
+    process.exitCode=1;
+  });
 });
