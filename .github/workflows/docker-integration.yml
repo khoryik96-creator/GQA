@@ -202,6 +202,47 @@ jobs:
           assert len(flow["steps"]) >= 4, flow
           assert any(x["op"] == "assert_text" for x in flow["steps"]), flow
           assert len(flow["digest"]) == 64, flow
+          # v0.18: typed step edits create an immutable successor with a fresh
+          # review digest. Past run/repair evidence remains on the old version.
+          edited_steps = [dict(step) for step in flow["steps"]]
+          assert edited_steps[-1]["op"] == "assert_text"
+          edited_steps[-1]["text"] = "User-edited visible postcondition"
+          revision = request(f"/api/projects/{project_id}/flows/{flow['id']}/revisions", {
+              "source_digest": flow["digest"], "steps": edited_steps
+          })
+          assert revision["revised_from_flow_id"] == flow["id"], revision
+          assert revision["steps"] == edited_steps, revision
+          assert revision["digest"] != flow["digest"], revision
+          with urllib.request.urlopen(BASE + f"/api/projects/{project_id}/flows/{flow['id']}/revisions") as response:
+              history = json.load(response)
+          assert [x["id"] for x in history] == [flow["id"],revision["id"]], history
+          assert history[0]["digest"] == flow["digest"]
+          try:
+              request(f"/api/projects/{project_id}/flows/{flow['id']}/revisions", {
+                  "source_digest": flow["digest"],"steps": edited_steps
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 409, exc.code
+          else:
+              raise AssertionError("A second successor from the same version was allowed")
+          try:
+              request(f"/api/projects/{project_id}/flows/{revision['id']}/execute", {
+                  "target_url":"http://fixture:8081","acknowledged_digest":flow["digest"]
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 403, exc.code
+          else:
+              raise AssertionError("An edited version accepted its ancestor's review digest")
+          try:
+              request(f"/api/projects/{project_id}/flows/{revision['id']}/revisions", {
+                  "source_digest":revision["digest"],
+                  "steps":[{"op":"javascript","text":"unsafe"}, {"op":"assert_text","text":"x"}]
+              })
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 400, exc.code
+          else:
+              raise AssertionError("An untyped JavaScript browser action was accepted")
+
 
           try:
               request(f"/api/projects/{project_id}/flows/{flow['id']}/execute", {
