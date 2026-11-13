@@ -259,6 +259,9 @@ type modelReview struct {
   Summary      string          `json:"summary"`
   Findings     []ReviewFinding `json:"findings"`
   CoverageGaps []CoverageGap   `json:"coverage_gaps"`
+  // Reviewed lists files whose batch returned a usable review. It is set by
+  // runCodeReview, never by the model.
+  Reviewed []string `json:"-"`
 }
 
 func normalizeSpace(s string) string { return strings.Join(strings.Fields(s), " ") }
@@ -520,6 +523,7 @@ func runCodeReview(ctx context.Context, provider planningProvider, repo, sha, fo
   summaries := []string{}
   notices := []string{}
   discarded := 0
+  reviewed := []string{}
   for i, batch := range batches {
     raw, err := provider.complete(ctx, completionRequest{
       System: reviewSystemPrompt, User: buildReviewPrompt(repo, sha, focus, batch, i, len(batches)),
@@ -534,6 +538,9 @@ func runCodeReview(ctx context.Context, provider planningProvider, repo, sha, fo
       notices = append(notices, fmt.Sprintf("Batch %d of %d returned an invalid review and was ignored.", i+1, len(batches)))
       continue
     }
+    for _, f := range batch {
+      reviewed = append(reviewed, f.Path)
+    }
     kept, dropped := validateFindings(result.Findings, byPath)
     discarded += dropped
     all = append(all, kept...)
@@ -542,7 +549,7 @@ func runCodeReview(ctx context.Context, provider planningProvider, repo, sha, fo
       summaries = append(summaries, clip(s, 1500))
     }
   }
-  return modelReview{Summary: strings.Join(summaries, "\n\n"), Findings: all, CoverageGaps: sanitizeGaps(gaps)}, discarded, notices
+  return modelReview{Summary: strings.Join(summaries, "\n\n"), Findings: all, CoverageGaps: sanitizeGaps(gaps), Reviewed: reviewed}, discarded, notices
 }
 
 // --- HTTP handlers --------------------------------------------------------
@@ -613,18 +620,21 @@ func (s *server) executeCodeReview(reviewID, repoURL, focus string, provider pla
     return
   }
   result, discarded, notices := runCodeReview(ctx, provider, repo, sha, focus, files)
-  if len(notices) == len(batchSources(files)) {
+  if len(result.Reviewed) == 0 {
     finishFailed("The model provider did not return a usable review. " + strings.Join(notices, " "))
     return
   }
   findings, counts := finalizeFindings(result.Findings)
-  paths := make([]string, 0, len(files))
-  for _, f := range files {
-    paths = append(paths, f.Path)
-  }
+  // Coverage counts only files from batches that returned a usable review.
+  paths := result.Reviewed
+  unreviewed := len(files) - len(paths)
   notices = append(notices,
     "Findings are model-generated and remain 'suspected' until reproduced by a test. Absence of findings is not proof that the code is correct.",
-    fmt.Sprintf("%d files were reviewed; %d reviewable files were not included because of size or budget limits.", len(files), skipped))
+    fmt.Sprintf("%d files were reviewed; %d reviewable files were not included because of size or budget limits.", len(paths), skipped))
+  if unreviewed > 0 {
+    notices = append(notices, fmt.Sprintf("%d downloaded files were not reviewed because their batch failed; they are counted as not included.", unreviewed))
+    skipped += unreviewed
+  }
   if discarded > 0 {
     notices = append(notices, fmt.Sprintf("%d model findings were discarded because their file, line range or quoted evidence did not match the reviewed commit.", discarded))
   }

@@ -166,6 +166,9 @@ func TestRunCodeReviewAgainstMockProvider(t *testing.T) {
   if len(result.Findings) != 1 || discarded != 1 || result.Findings[0].Category != "validation" {
     t.Fatalf("findings %+v discarded %d", result.Findings, discarded)
   }
+  if len(result.Reviewed) != 1 || result.Reviewed[0] != "api/orders.go" {
+    t.Fatalf("reviewed %v", result.Reviewed)
+  }
   if len(result.CoverageGaps) != 1 || result.Summary != "One real defect." {
     t.Fatalf("gaps/summary %+v %q", result.CoverageGaps, result.Summary)
   }
@@ -176,7 +179,7 @@ func TestRunCodeReviewReportsProviderFailurePerBatch(t *testing.T) {
   defer server.Close()
   provider := planningProvider{Kind: providerDeepSeek, URL: server.URL, Model: "m", Key: "bad", Client: server.Client()}
   result, _, notices := runCodeReview(context.Background(), provider, "o/r", "sha", "", []sourceFile{reviewSource})
-  if len(result.Findings) != 0 || len(notices) != 1 || !strings.Contains(notices[0], "HTTP 401") {
+  if len(result.Findings) != 0 || len(result.Reviewed) != 0 || len(notices) != 1 || !strings.Contains(notices[0], "HTTP 401") {
     t.Fatalf("expected one failure notice, got %v", notices)
   }
 }
@@ -185,5 +188,26 @@ func TestSanitizeGapsDedupesAcrossBatches(t *testing.T) {
   gaps := sanitizeGaps([]CoverageGap{{Area: "Auth", Reason: "No tests"}, {Area: "auth ", Reason: "No  tests"}, {Area: "", Reason: "x"}, {Area: "Billing", Reason: "No tests"}})
   if len(gaps) != 2 {
     t.Fatalf("got %+v", gaps)
+  }
+}
+
+func TestRunCodeReviewCountsOnlySuccessfulBatchesAsReviewed(t *testing.T) {
+  var calls int32
+  server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    if atomic.AddInt32(&calls, 1) == 2 {
+      w.WriteHeader(504)
+      return
+    }
+    w.Write([]byte(`{"choices":[{"message":{"content":"{\"summary\":\"ok\",\"findings\":[],\"coverage_gaps\":[]}"},"finish_reason":"stop"}]}`))
+  }))
+  defer server.Close()
+  files := []sourceFile{}
+  for i := 0; i < 3; i++ {
+    files = append(files, sourceFile{Path: fmt.Sprintf("src/f%d.go", i), Content: strings.Repeat("x", 70<<10)})
+  }
+  provider := planningProvider{Kind: providerDeepSeek, URL: server.URL, Model: "m", Key: "k", Client: server.Client()}
+  result, _, notices := runCodeReview(context.Background(), provider, "o/r", "sha", "", files)
+  if len(result.Reviewed) != 2 || result.Reviewed[0] != "src/f0.go" || result.Reviewed[1] != "src/f2.go" || len(notices) != 1 {
+    t.Fatalf("reviewed %v notices %v", result.Reviewed, notices)
   }
 }
