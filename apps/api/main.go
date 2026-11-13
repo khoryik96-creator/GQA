@@ -82,6 +82,11 @@ func main() {
     os.Getenv("GQA_COOKIE_SECURE")=="true")
   if err!=nil{log.Fatal("authentication setup: ",err)}
   if err:=auth.bootstrap(ctx);err!=nil{log.Fatal("admin account bootstrap: ",err)}
+  if err:=reconcileOrphanedRuns(ctx,db);err!=nil{log.Fatal("reconcile orphaned runs: ",err)}
+  if err:=pruneExpiredMetadata(ctx,db);err!=nil{log.Printf("metadata housekeeping: %v",err)}
+  maintenanceCtx,stopMaintenance:=context.WithCancel(context.Background())
+  defer stopMaintenance()
+  go maintainLocalMetadata(maintenanceCtx,db)
   if len(os.Getenv("GQA_RUNNER_TOKEN"))<24 {
     log.Fatal("GQA_RUNNER_TOKEN must be a 24+ character secret in local .env")
   }
