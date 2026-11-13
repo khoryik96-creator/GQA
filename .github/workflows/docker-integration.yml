@@ -676,6 +676,22 @@ jobs:
           print("PASS: memory-aware QA planning, real API/browser checks, screenshot, production block, typed browser flows, reviewable repairs, admin login, CSRF checks and logout")
           PY
 
+      - name: Ensure generated QA audit events cannot be changed or deleted
+        run: |
+          set -euo pipefail
+          existing="$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM qa_activity_audit')"
+          test "$existing" -gt 5
+          if docker compose exec -T db psql -U gqa -d gqa -v ON_ERROR_STOP=1 -c              "UPDATE qa_activity_audit SET result_status='forged' WHERE id=(SELECT id FROM qa_activity_audit LIMIT 1)" >/dev/null 2>&1; then
+            echo "ERROR: an audit record was altered"
+            exit 1
+          fi
+          if docker compose exec -T db psql -U gqa -d gqa -v ON_ERROR_STOP=1 -c              "DELETE FROM qa_activity_audit WHERE id=(SELECT id FROM qa_activity_audit LIMIT 1)" >/dev/null 2>&1; then
+            echo "ERROR: an audit record was deleted"
+            exit 1
+          fi
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM qa_activity_audit')" = "$existing"
+          echo "PASS: audit rows remain append-only after privileged SQL mutation attempts"
+
       - name: Revoke in-flight QA member while the isolated runner is paused
         env:
           GQA_ISOLATED_REVOCATION_TEST: "YES"
