@@ -160,8 +160,9 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
   body,_:=json.Marshal(map[string]any{"target_url":target,"run_api":runAPI,"run_web":runWeb})
   runnerURL:=os.Getenv("GQA_RUNNER_URL")
   if runnerURL==""{runnerURL="http://runner:8090/run"}
-  ctx,cancel:=context.WithTimeout(context.Background(),75*time.Second)
+  ctx,cancel:=context.WithTimeout(r.Context(),75*time.Second)
   defer cancel()
+  go s.monitorExecutionPermission(ctx,cancel,r,id)
   req,err:=http.NewRequestWithContext(ctx,http.MethodPost,runnerURL,bytes.NewReader(body))
   if err!=nil{fail(w,500,"Unable to initialize runner request");return}
   req.Header.Set("Content-Type","application/json")
@@ -178,6 +179,12 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
      reply=recordedRunnerFailure("Runner availability")
    }else if !validatedSmokeChecks(reply.Checks,runAPI,runWeb){
      reply=invalidEvidence()
+   }
+   authCtx,authCancel:=context.WithTimeout(context.Background(),3*time.Second)
+   stillAuthorized,permissionErr:=s.executionStillAuthorized(authCtx,r,id)
+   authCancel()
+   if permissionErr!=nil || !stillAuthorized {
+     reply=recordedRunnerFailure("Execution authorization revoked or unavailable")
    }
    run.Checks=reply.Checks
   if len(run.Checks)==0{run.Checks=[]SmokeCheck{{Name:"Runner evidence",Status:"failed",Detail:"Runner produced no checks"}}}
@@ -206,6 +213,8 @@ func (s *server) runs(w http.ResponseWriter,r *http.Request){
     evidence=$5::jsonb,finished_at=now() WHERE id=$1::uuid RETURNING finished_at`,
     run.ID,string(resultJSON),run.Status,run.ScreenshotAvailable,string(evidenceJSON)).Scan(&run.FinishedAt)
   if err!=nil{fail(w,500,"Run completed but could not save results");return}
+  if permissionErr!=nil{fail(w,503,"Execution authorization check unavailable");return}
+  if !stillAuthorized{fail(w,403,"Execution authorization revoked during the run");return}
   writeJSON(w,201,run)
 }
 
