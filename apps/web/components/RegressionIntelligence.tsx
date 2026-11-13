@@ -18,6 +18,7 @@ type QualityCase={
 type QualityDay={date:string;passed:number;failed:number};
 type QualityReport={
  sample_runs:number;sample_limit:number;truncated:boolean;
+ excluded_infrastructure:number;
  scenarios:number;passing:number;failing:number;regressions:number;
  recoveries:number;persistent_failures:number;unstable_patterns:number;
  cases:QualityCase[];daily:QualityDay[];
@@ -154,6 +155,10 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
      <div><span>Regressions</span><strong>{report.regressions}</strong><small>Pass → fail transitions</small></div>
      <div><span>Recovered</span><strong>{report.recoveries}</strong><small>Fail → pass transitions</small></div>
     </div>
+    {report.excluded_infrastructure>0&&<p className="quality-caution">
+     {report.excluded_infrastructure} infrastructure failures were excluded from product regression classifications.
+     Review worker health separately.
+    </p>}
     {report.truncated&&<p className="quality-caution">
      This view uses the most recent {report.sample_limit} completed runs. Older results were excluded, so a first observed result might have earlier history.
     </p>}

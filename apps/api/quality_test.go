@@ -75,3 +75,14 @@ func TestQualityNoData(t *testing.T){
   t.Fatalf("empty quality view invalid %+v",got)
  }
 }
+
+func TestInfrastructureFailureExcludedFromProductRegressions(t *testing.T){
+ valid:=qualityRun("1","smoke","http://fixture:8081","passed",1,ck("API GET /healthz","passed"))
+ brokenWorker:=qualityRun("2","smoke","http://fixture:8081","failed",2,ck("Runner availability","failed"))
+ brokenWorker.Evidence=RunEvidence{FailureKind:"runner_unavailable"}
+ got:=summarizeQuality([]QualityRun{brokenWorker,valid},200)
+ if got.Regressions!=0||got.ExcludedInfrastructure!=1||
+  got.Scenarios!=1||got.Cases[0].Status!="passed"{
+  t.Fatalf("Infrastructure outage misclassified as application regression: %+v",got)
+ }
+}

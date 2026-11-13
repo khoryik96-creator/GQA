@@ -22,6 +22,7 @@ type QualityRun struct {
  Target string
  Status string
  Checks []SmokeCheck
+ Evidence RunEvidence
  StartedAt time.Time
 }
 
@@ -59,6 +60,7 @@ type QualityDay struct {
 
 type QualityReport struct {
  SampleRuns int `json:"sample_runs"`
+ ExcludedInfrastructure int `json:"excluded_infrastructure"`
  SampleLimit int `json:"sample_limit"`
  Truncated bool `json:"truncated"`
  Scenarios int `json:"scenarios"`
@@ -114,6 +116,25 @@ func newlyAbsent(current,previous []string)[]string{
  return delta
 }
 
+
+func applicationResult(run QualityRun)bool{
+ if run.Status!="failed"{return true}
+ switch run.Evidence.FailureKind{
+ case "runner_unavailable","worker_timeout","worker_crash","worker_error",
+ "worker_spawn_failure","worker_ipc_failure","invalid_worker_result",
+ "invalid_worker_timeout","worker_cancelled","worker_cleanup_failed",
+ "broker_restart","browser_initialization_failed":
+  return false
+ }
+ for _,check:=range run.Checks{
+  if strings.HasPrefix(check.Name,"Runner ")||
+   strings.HasPrefix(check.Name,"Browser runner ")||
+   strings.HasPrefix(check.Name,"Worker ")||
+   strings.HasPrefix(check.Name,"Ephemeral job "){return false}
+ }
+ return true
+}
+
 func summarizeQuality(records []QualityRun,limit int) QualityReport{
  report:=QualityReport{Cases:[]QualityCase{},Daily:[]QualityDay{},SampleLimit:limit}
  if limit<=0{limit=qualityRunLimit;report.SampleLimit=limit}
@@ -130,6 +151,10 @@ func summarizeQuality(records []QualityRun,limit int) QualityReport{
  grouped:=map[string][]QualityRun{}
  days:=map[string]*QualityDay{}
  for _,run:=range history{
+  if !applicationResult(run){
+   report.ExcludedInfrastructure++
+   continue
+  }
   key,_,valid:=qualityIdentity(run)
   if !valid{continue}
   grouped[key]=append(grouped[key],run)
@@ -209,7 +234,7 @@ func (s *server) quality(w http.ResponseWriter,r *http.Request){
  projectID,ok:=validProjectID(w,r);if !ok{return}
  rows,err:=s.db.Query(r.Context(),`
   SELECT id::text,plan_id::text,COALESCE(flow_id::text,''),
-    execution_kind,target_url,status,checks,started_at
+    execution_kind,target_url,status,checks,evidence,started_at
   FROM test_runs
   WHERE project_id=$1::uuid AND status IN ('passed','failed')
   ORDER BY started_at DESC,id DESC LIMIT $2`,projectID,qualityRunLimit+1)
@@ -218,15 +243,18 @@ func (s *server) quality(w http.ResponseWriter,r *http.Request){
  input:=[]QualityRun{}
  for rows.Next(){
   var run QualityRun
-  var checksJSON []byte
+  var checksJSON,evidenceJSON []byte
   if err:=rows.Scan(&run.ID,&run.PlanID,&run.FlowID,&run.Kind,
-     &run.Target,&run.Status,&checksJSON,&run.StartedAt);err!=nil{
+     &run.Target,&run.Status,&checksJSON,&evidenceJSON,&run.StartedAt);err!=nil{
     fail(w,500,"Unable to read quality history");return
   }
   if err:=json.Unmarshal(checksJSON,&run.Checks);err!=nil{
     fail(w,500,"Invalid saved run checks");return
   }
   if len(run.Checks)>100{fail(w,500,"Excessive saved check count");return}
+  if err:=json.Unmarshal(evidenceJSON,&run.Evidence);err!=nil{
+   fail(w,500,"Invalid saved run evidence");return
+  }
   input=append(input,run)
  }
  if rows.Err()!=nil{fail(w,500,"Unable to finish quality history");return}
