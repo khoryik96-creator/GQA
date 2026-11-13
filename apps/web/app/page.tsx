@@ -204,6 +204,17 @@ export default function CommandCenter() {
   }, [selectedId, authStatus, overviewRevision]);
 
 
+  function selectProject(id: string) {
+    if (id === selectedId) return;
+    // Clear project-scoped records and pending memory corrections in the same
+    // React update as selection, before another project's panel can render.
+    selectedProjectRef.current = id;
+    setPlans([]); setMemories([]); setRuns([]); setInspection(null);
+    setMemoryText(""); setSupersedesId(""); setMemorySearch("");
+    setError(""); setView("command");
+    setSelectedId(id);
+  }
+
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthBusy(true); setLoginError("");
@@ -254,11 +265,9 @@ export default function CommandCenter() {
         body: JSON.stringify({ name: projectName, repo_url: repoURL, app_type: appType, stack })
       });
       setProjects(list => [created, ...list]);
-      selectedProjectRef.current=created.id;
-      setSelectedId(created.id);
+      selectProject(created.id);
       setShowCreate(false);
       setProjectName(""); setRepoURL(""); setStack("");
-      setView("command");
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
   }
@@ -388,7 +397,7 @@ export default function CommandCenter() {
         <div className="sidebar-section">
           <div className="section-title"><span>PROJECTS</span>{isAdmin&&<button className="icon-btn" title="Create project" onClick={() => setShowCreate(true)}><Plus size={16}/></button>}</div>
           {projects.map(p => (
-            <button key={p.id} className={"project-item " + (selectedId === p.id ? "active" : "")} onClick={() => { selectedProjectRef.current=p.id; setSelectedId(p.id); setView("command"); setError(""); }}>
+            <button key={p.id} className={"project-item " + (selectedId === p.id ? "active" : "")} onClick={() => selectProject(p.id)}>
               <Layers3 size={16}/><span>{p.name}</span>
               {selectedId === p.id && <span className="selected-indicator"/>}
             </button>
