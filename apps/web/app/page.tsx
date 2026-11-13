@@ -17,6 +17,7 @@ const BrowserFlowStudio = dynamic(() => import("../components/BrowserFlowStudio"
 const TeamAccess = dynamic(() => import("../components/TeamAccess"));
 const AccountSecurity = dynamic(() => import("../components/AccountSecurity"));
 const RegressionIntelligence = dynamic(() => import("../components/RegressionIntelligence"));
+const CodeReview = dynamic(() => import("../components/CodeReview"));
 
 type AppType = "fullstack" | "web" | "api" | "backend" | "mobile";
 type Environment = "local" | "staging" | "production";
@@ -110,7 +111,7 @@ export default function CommandCenter() {
   const [inspecting, setInspecting] = useState(false);
   const [runningSmoke, setRunningSmoke] = useState(false);
   const [smokeTarget, setSmokeTarget] = useState("http://fixture:8081");
-  const [view, setView] = useState<"command" | "memory" | "team" | "insights">("command");
+  const [view, setView] = useState<"command" | "memory" | "team" | "insights" | "review">("command");
   const [showCreate, setShowCreate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingMemory, setSavingMemory] = useState(false);
@@ -564,6 +565,7 @@ export default function CommandCenter() {
               <div className="tabs">
                 <button className={view === "command" ? "current" : ""} onClick={() => setView("command")}><BrainCircuit size={17}/> QA Command</button>
                 <button className={view === "memory" ? "current" : ""} onClick={() => setView("memory")}><Database size={17}/> Project Memory <span className="mini-count">{memories.length}</span></button>
+                <button className={view === "review" ? "current" : ""} onClick={() => setView("review")}><FileCode2 size={17}/> Code Review</button>
                 <button className={view === "insights" ? "current" : ""} onClick={() => setView("insights")}><Activity size={17}/> Regression Insights</button>
                 {canManage&&<button className={view==="team"?"current":""} onClick={()=>setView("team")}><ShieldCheck size={17}/> Team Access</button>}
               </div>
@@ -571,6 +573,8 @@ export default function CommandCenter() {
               {view === "team" && canManage && account ? (
                 <TeamAccess key={selected.id} projectId={selected.id} apiBase={API}
                   isAdmin={!!isAdmin} selfUserId={account.id}/>
+              ) : view === "review" ? (
+                <CodeReview key={selected.id} projectId={selected.id} apiBase={API} canRun={canQA}/>
               ) : view === "insights" ? (
                 <RegressionIntelligence key={selected.id} projectId={selected.id} apiBase={API}/>
               ) : view === "command" ? (
