@@ -77,10 +77,14 @@ const server=http.createServer(async(req,res)=>{
     return respond(res,401,{error:"Unauthorized"});
   if(req.method==="GET"&&route==="/jobs")
     return respond(res,200,scheduler.list().slice(0,100));
-  const jobRoute=/^\/jobs\/([a-f0-9-]{36})(\/cancel)?$/.exec(route);
+  const jobRoute=/^\/jobs\/([a-f0-9-]{36})(\\/cancel|\\/result)?$/.exec(route);
   if(jobRoute){
     const id=jobRoute[1];
     if(!ID.test(id))return respond(res,400,{error:"Invalid job identity"});
+    if(req.method==="GET"&&jobRoute[2]==="/result"){
+      const result=scheduler.getResult(id);
+      return respond(res,result?200:404,result||{error:"Job evidence not found"});
+    }
     if(req.method==="GET"&&!jobRoute[2]){
       const job=scheduler.get(id);
       return respond(res,job?200:404,job||{error:"Job not found"});

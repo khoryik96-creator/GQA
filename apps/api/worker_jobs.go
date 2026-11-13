@@ -24,7 +24,8 @@ func (s *server) brokerJobs(w http.ResponseWriter,r *http.Request){
  if r.PathValue("id")!="" {
    if !uuidRE.MatchString(r.PathValue("id")){fail(w,400,"Invalid job identity");return}
    path+="/"+r.PathValue("id")
-   if r.Method==http.MethodPost{path+="/cancel"}
+   if r.Method==http.MethodPost{path+="/cancel"
+   }else if strings.HasSuffix(r.URL.Path,"/result"){path+="/result"}
  }
  endpoint,enabled:=brokerJobURL(path)
  if !enabled {
@@ -46,8 +47,10 @@ func (s *server) brokerJobs(w http.ResponseWriter,r *http.Request){
  if response.StatusCode!=200 && response.StatusCode!=404 {
    fail(w,502,"Job broker declined request");return
  }
- raw,err:=io.ReadAll(io.LimitReader(response.Body,65537))
- if err!=nil || len(raw)>65536 || !json.Valid(raw) {
+ maxSize:=65536
+ if strings.HasSuffix(path,"/result"){maxSize=2<<20}
+ raw,err:=io.ReadAll(io.LimitReader(response.Body,int64(maxSize+1)))
+ if err!=nil || len(raw)>maxSize || !json.Valid(raw) {
    fail(w,502,"Invalid job broker response");return
  }
  w.Header().Set("Content-Type","application/json")
