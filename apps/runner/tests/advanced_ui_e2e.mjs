@@ -104,23 +104,26 @@ async function checkRole(role, projectA, projectB, email) {
     records.push("failed memory GET preserves session and recovers via explicit retry");
   }
   if (role === "qa") {
-    await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: /Project Memory/ }).waitFor();
-    const dimensions = await page.evaluate(() => {
-      const viewport = document.documentElement.clientWidth;
-      return {
-        viewport,
-        content: document.documentElement.scrollWidth,
-        offenders: [...document.querySelectorAll("body *")].map(el => {
-          const rect = el.getBoundingClientRect();
-          return { tag: el.tagName, className: typeof el.className === "string" ? el.className.slice(0, 90) : "",
-            right: Math.round(rect.right), width: Math.round(rect.width) };
-        }).filter(el => el.right > viewport + 2 && el.width > 0).slice(0, 12)
-      };
-    });
-    assert.ok(dimensions.content <= dimensions.viewport + 2,
-      "Mobile UI overflows viewport: " + JSON.stringify(dimensions));
-    records.push("390px mobile layout does not horizontally overflow");
+    for (const width of [320, 375, 390, 430, 600, 760, 768, 1024, 1280]) {
+      await page.setViewportSize({width, height:844});
+      const dimensions = await page.evaluate(() => {
+        const viewport = document.documentElement.clientWidth;
+        return {
+          viewport,
+          content: document.documentElement.scrollWidth,
+          offenders: [...document.querySelectorAll("body *")].map(el => {
+            const rect = el.getBoundingClientRect();
+            return { tag:el.tagName,
+              className:typeof el.className === "string" ? el.className.slice(0,90) : "",
+              right:Math.round(rect.right),width:Math.round(rect.width) };
+          }).filter(el => el.right > viewport + 2 && el.width > 0).slice(0,12)
+        };
+      });
+      assert.ok(dimensions.content <= dimensions.viewport + 2,
+        width + "px memory layout overflows: " + JSON.stringify(dimensions));
+    }
+    records.push("nine responsive widths (320–1280px) have no document horizontal overflow");
   }
   await context.close();
   records.push(role + " role UI visibility and API authorization");
