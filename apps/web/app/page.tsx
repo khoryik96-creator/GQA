@@ -11,6 +11,7 @@ import ScenarioReview, { type TestSpecification } from "../components/ScenarioRe
 import BrowserFlowStudio from "../components/BrowserFlowStudio";
 import TeamAccess from "../components/TeamAccess";
 import AccountSecurity from "../components/AccountSecurity";
+import RegressionIntelligence from "../components/RegressionIntelligence";
 
 type AppType = "fullstack" | "web" | "api" | "backend" | "mobile";
 type Environment = "local" | "staging" | "production";
@@ -93,7 +94,7 @@ export default function CommandCenter() {
   const [inspecting, setInspecting] = useState(false);
   const [runningSmoke, setRunningSmoke] = useState(false);
   const [smokeTarget, setSmokeTarget] = useState("http://fixture:8081");
-  const [view, setView] = useState<"command" | "memory" | "team">("command");
+  const [view, setView] = useState<"command" | "memory" | "team" | "insights">("command");
   const [showCreate, setShowCreate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingMemory, setSavingMemory] = useState(false);
@@ -355,7 +356,7 @@ export default function CommandCenter() {
           {loadingProjects && <span className="muted small">Loading projects…</span>}
         </div>
         <div className="sidebar-footer">
-          <div className="status-dot"/><span>GQA v0.8</span>
+          <div className="status-dot"/><span>GQA v0.12</span>
           <small>{account?.email} · {account?.global_role}</small>
         </div>
       </aside>
@@ -403,7 +404,7 @@ export default function CommandCenter() {
           ) : (
             <>
               <div className="page-intro">
-                <div><div className="eyebrow"><Sparkles size={14}/> PROJECT INTELLIGENCE</div><h1>{selected.name}</h1><p>Plan intelligent testing with persistent project memory and specialist agent selection.</p></div>
+                <div><div className="eyebrow"><Sparkles size={14}/> PROJECT INTELLIGENCE</div><h1>{selected.name}</h1><p>Plan tests, investigate regressions and preserve verified project knowledge.</p></div>
                 <div className="project-chip"><GitBranch size={16}/><span>{labels[selected.app_type]} · {projectRole}</span></div>
               </div>
               <div className="repo-strip"><GitBranch size={16}/><a href={selected.repo_url} target="_blank" rel="noreferrer">{selected.repo_url}</a><span className="subtle-divider"/> <span>{selected.stack || "Stack not recorded"}</span></div>
@@ -411,12 +412,15 @@ export default function CommandCenter() {
               <div className="tabs">
                 <button className={view === "command" ? "current" : ""} onClick={() => setView("command")}><BrainCircuit size={17}/> QA Command</button>
                 <button className={view === "memory" ? "current" : ""} onClick={() => setView("memory")}><Database size={17}/> Project Memory <span className="mini-count">{memories.length}</span></button>
+                <button className={view === "insights" ? "current" : ""} onClick={() => setView("insights")}><Activity size={17}/> Regression Insights</button>
                 {canManage&&<button className={view==="team"?"current":""} onClick={()=>setView("team")}><ShieldCheck size={17}/> Team Access</button>}
               </div>
 
               {view === "team" && canManage && account ? (
                 <TeamAccess key={selected.id} projectId={selected.id} apiBase={API}
                   isAdmin={!!isAdmin} selfUserId={account.id}/>
+              ) : view === "insights" ? (
+                <RegressionIntelligence key={selected.id} projectId={selected.id} apiBase={API}/>
               ) : view === "command" ? (
                 <div className="workspace-grid">
                   <div className="workspace-main">
@@ -455,7 +459,7 @@ export default function CommandCenter() {
                       apiBase={API}
                     />
                     <section className="card">
-                      <div className="card-head"><div><h2><Activity size={18}/> Read-only smoke execution</h2><p>Real API and Playwright checks in a separate local Docker runner.</p></div><span className="pill neutral">v0.2</span></div>
+                      <div className="card-head"><div><h2><Activity size={18}/> Read-only smoke execution</h2><p>Real API and Playwright checks in a separate local Docker runner.</p></div><span className="pill neutral">Approved targets</span></div>
                       <form className="smoke-form" onSubmit={executeSmoke}>
                         <label>Approved test target<input value={smokeTarget} onChange={e => setSmokeTarget(e.target.value)} placeholder="http://fixture:8081"/></label>
                         <p className="fine-print">The built-in fixture works immediately. Other origins must be explicitly allowlisted in both Docker services. No write, load, or active security tests are permitted.</p>
