@@ -88,8 +88,8 @@ export default function TeamAccess({projectId,apiBase,isAdmin,selfUserId}:Props)
  return <div className="team-grid">
   <section className="card">
    <div className="card-head"><div><h2><Users size={18}/> Project team</h2><p>Roles are enforced on the API, including test runs, memory and screenshots.</p></div></div>
-   {error&&<div className="browser-flow-error"><AlertTriangle size={16}/>{error}</div>}
-   {message&&<p className="team-success"><CheckCircle2 size={16}/>{message}</p>}
+   {error&&<div className="browser-flow-error" role="alert"><AlertTriangle size={16}/>{error}</div>}
+   {message&&<p className="team-success" role="status"><CheckCircle2 size={16}/>{message}</p>}
    <div className="team-members">
     {members.length===0&&<p className="muted small">No project-level team members assigned yet. Global administrators have access by default.</p>}
     {members.map(member=><div className="team-member" key={member.user_id}>

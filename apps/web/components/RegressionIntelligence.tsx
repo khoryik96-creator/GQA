@@ -154,8 +154,8 @@ export default function RegressionIntelligence({projectId,apiBase}:{projectId:st
     <button type="button" className="button secondary" disabled={loading}
        onClick={()=>setRevision(x=>x+1)}><RefreshCw size={15}/> Refresh results</button>
    </div>
-   {error&&<div className="browser-flow-error"><AlertTriangle size={15}/>{error}</div>}
-   {loading&&<p className="muted small">Analysing recent completed QA runs…</p>}
+   {error&&<div className="browser-flow-error" role="alert"><AlertTriangle size={15}/>{error}</div>}
+   {loading&&<p className="muted small" role="status">Analysing recent completed QA runs…</p>}
    {report&&<>
     {refreshedAt&&<p className="quality-small">Last refreshed {refreshedAt.toLocaleString()}</p>}
     <div className="quality-metrics">
