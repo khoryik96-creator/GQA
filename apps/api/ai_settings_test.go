@@ -102,3 +102,34 @@ func TestEnvProviderName(t *testing.T) {
     t.Fatal("alias should normalize")
   }
 }
+
+func TestUnreadableSavedKeyNeverFallsBackToEnvironmentKey(t *testing.T) {
+  t.Setenv("GQA_LLM_PROVIDER", "deepseek")
+  t.Setenv("GQA_LLM_API_KEY", "sk-environment-key-0000")
+  t.Setenv("GQA_LLM_MODEL", "")
+  t.Setenv("GQA_LLM_CHAT_COMPLETIONS_URL", "")
+  original, _ := newSecretBox(testSecret)
+  sealed, _ := original.seal("deepseek", "sk-dashboard-key-1111")
+  row := storedProvider{Sealed: sealed, KeyHint: "1111"}
+
+  p, ready := resolveStoredProvider("deepseek", true, row, original, nil)
+  if !ready || p.Key != "sk-dashboard-key-1111" {
+    t.Fatalf("saved key should win: ready=%v key=%q", ready, p.Key)
+  }
+  rotated, _ := newSecretBox(strings.Repeat("r", 40))
+  if p, ready := resolveStoredProvider("deepseek", true, row, rotated, nil); ready || p.Key != "" {
+    t.Fatalf("unreadable saved key must disable AI, got ready=%v key=%q", ready, p.Key)
+  }
+  if p, ready := resolveStoredProvider("deepseek", true, row, nil, errSecretsKeyMissing); ready || p.Key != "" {
+    t.Fatalf("missing secret with a saved key must disable AI, got ready=%v key=%q", ready, p.Key)
+  }
+  if p, ready := resolveStoredProvider("deepseek", true, storedProvider{}, nil, errSecretsKeyMissing); !ready || p.Key != "sk-environment-key-0000" {
+    t.Fatalf("with no saved key the environment key should be used: ready=%v key=%q", ready, p.Key)
+  }
+  if _, ready := resolveStoredProvider("openai", true, storedProvider{}, nil, nil); ready {
+    t.Fatal("environment key must not be used for a different provider")
+  }
+  if _, ready := resolveStoredProvider("deepseek", false, row, original, nil); ready {
+    t.Fatal("without consent AI must stay off")
+  }
+}

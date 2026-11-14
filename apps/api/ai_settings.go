@@ -163,16 +163,25 @@ func (s aiSettingsStore) resolve(ctx context.Context) (planningProvider, bool, b
     log.Printf("AI settings: %v", err)
     return planningProvider{}, false, true
   }
-  row := stored[name]
+  box, boxErr := secretBoxFromEnvironment()
+  p, ready := resolveStoredProvider(name, sendContext, stored[name], box, boxErr)
+  return p, ready, true
+}
+
+// resolveStoredProvider combines saved settings with the environment. A key
+// saved in the dashboard wins. If a saved key cannot be decrypted, AI stays
+// off: the environment key is used only when no key was saved at all, so a
+// lost GQA_SECRETS_KEY never silently switches to a different credential.
+func resolveStoredProvider(name string, sendContext bool, row storedProvider, box *secretBox, boxErr error) (planningProvider, bool) {
   key := ""
   if len(row.Sealed) > 0 {
-    box, err := secretBoxFromEnvironment()
+    err := boxErr
     if err == nil {
       key, err = box.open(name, row.Sealed)
     }
     if err != nil {
-      log.Printf("AI settings: %s key unavailable: %v", name, err)
-      key = ""
+      log.Printf("AI settings: %s key unavailable, AI features disabled: %v", name, err)
+      return planningProvider{Kind: name}, false
     }
   }
   envMatches := envProviderName() == name
@@ -187,7 +196,7 @@ func (s aiSettingsStore) resolve(ctx context.Context) (planningProvider, bool, b
     endpoint = os.Getenv("GQA_LLM_CHAT_COMPLETIONS_URL")
   }
   p, err := resolveProvider(name, endpoint, model, key)
-  return p, err == nil && sendContext, true
+  return p, err == nil && sendContext
 }
 
 func (s *server) providerFromSettings(ctx context.Context) (planningProvider, bool) {
