@@ -96,8 +96,8 @@ function Set-MissingDotEnvValues([string]$Path, [hashtable]$Wanted) {
     # UTF-8 without a byte-order mark, LF line endings: what Docker Compose expects.
     [IO.File]::WriteAllText($Path, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
   }
-  # The comma keeps an empty or one-item array from being unrolled.
-  return ,$added
+  # Callers wrap the call in @(...), which handles zero, one or many keys.
+  return $added
 }
 
 function Wait-ForUrl([string]$Url, [int]$Seconds) {
@@ -173,6 +173,23 @@ if ($NoUpdate) {
   Write-Note 'This folder is not a Git clone, so the code cannot be updated automatically.'
 }
 
+# Older checkouts on Windows converted files to CRLF line endings, which breaks
+# scripts that run inside the Linux containers. .gitattributes now asks for LF;
+# re-check out the tracked files once so the existing copy follows it.
+$probe = Join-Path $RepoDir 'db-migrate\migrate.sh'
+if ((Test-Path (Join-Path $RepoDir '.git')) -and (Test-Path $probe) -and
+    ([IO.File]::ReadAllText($probe)).Contains("`r")) {
+  if (& git status --porcelain --untracked-files=no) {
+    Write-Note 'Some files have Windows line endings, but you have local changes, so they were left as they are.'
+  } else {
+    Write-Step 'Fixing Windows line endings in GQA files'
+    & git rm -r --cached --quiet .
+    & git reset --hard --quiet HEAD
+    if ($LASTEXITCODE -eq 0) { Write-Ok 'Files re-checked out with Linux line endings (your .env was not touched).' }
+    else { Write-Note 'Could not re-check out files; continuing (the migration step tolerates CRLF).' }
+  }
+}
+
 # --- 3. Configuration (.env) -------------------------------------------------
 Write-Step 'Checking configuration (.env)'
 $envFile = Join-Path $RepoDir '.env'
@@ -244,7 +261,8 @@ if ($newAdminPassword -and -not $existingDatabase) {
   Write-Host " Password: $newAdminPassword" -ForegroundColor White
   Write-Host ' (also saved as GQA_ADMIN_PASSWORD in .env; change it later in Account security)'
 } else {
-  Write-Host ' Password: your existing administrator password'
+  Write-Host ' Password: your current administrator password. On a new database it is the'
+  Write-Host ' GQA_ADMIN_PASSWORD value in .env.'
 }
 Write-Host ''
 Write-Host ' To enable AI code review: open "AI settings" (top right), choose'

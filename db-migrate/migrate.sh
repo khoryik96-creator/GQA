@@ -22,6 +22,13 @@ CREATE TABLE IF NOT EXISTS public.gqa_schema_migrations (
  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );"
 
+# Checkouts on Windows may have CRLF line endings. Checksums and execution
+# use a copy with carriage returns removed, so the recorded checksum is the
+# same on every platform (and identical to sha256sum of an LF file).
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+normalized() { tr -d '\r' < "$1" > "$work/${1##*/}" && printf '%s' "$work/${1##*/}"; }
+
 expected=1
 last=0
 found=false
@@ -36,6 +43,7 @@ for file in /migrations/versions/[0-9][0-9][0-9][0-9]_*.sql; do
    echo "Migration order is not contiguous at $name (expected $expected)" >&2
    exit 1
  }
+ file=$(normalized "$file")
  checksum=$(sha256sum "$file" | cut -d ' ' -f 1)
  recorded=$(psql -X -h db -U gqa -d gqa -At -v ON_ERROR_STOP=1 -c   "SELECT checksum FROM public.gqa_schema_migrations WHERE version=$version")
  if [ -n "$recorded" ]; then
@@ -59,5 +67,5 @@ newer=$(psql -X -h db -U gqa -d gqa -At -v ON_ERROR_STOP=1 -c  "SELECT count(*) 
 [ "$newer" = 0 ] || { echo "Database schema is newer than this code; refusing startup" >&2; exit 1; }
 
 # Role grants are idempotent; only the one-shot migrator has bootstrap rights.
-psql -X -h db -U gqa -d gqa -v ON_ERROR_STOP=1 --single-transaction  -v app_password="$GQA_DB_APP_PASSWORD" -f /migrations/roles.sql
+psql -X -h db -U gqa -d gqa -v ON_ERROR_STOP=1 --single-transaction  -v app_password="$GQA_DB_APP_PASSWORD" -f "$(normalized /migrations/roles.sql)"
 echo "GQA schema version $last and least-privileged application role ready"

@@ -27,7 +27,8 @@ services:
       - ./db-migrate/versions:/migrations/versions:ro
       - ./db-migrate/roles.sql:/migrations/roles.sql:ro
       - ./db-migrate/migrate.sh:/migrations/migrate.sh:ro
-    entrypoint: ["sh","/migrations/migrate.sh"]
+    # Strip carriage returns so a Windows (CRLF) checkout still runs.
+    entrypoint: ["sh","-c","tr -d '\\r' < /migrations/migrate.sh > /tmp/gqa-migrate.sh && exec sh /tmp/gqa-migrate.sh"]
     depends_on:
       db:
         condition: service_healthy
