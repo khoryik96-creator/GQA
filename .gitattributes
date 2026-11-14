@@ -1,3 +1,7 @@
+# Containers run these files on Linux, so check them out with LF on every
+# platform (Git for Windows otherwise converts them to CRLF).
+* text=auto eol=lf
+# Windows launchers need CRLF.
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
