@@ -574,9 +574,9 @@ func (s *server) startCodeReview(w http.ResponseWriter, r *http.Request) {
     fail(w, 400, "Focus must be at most 1000 characters")
     return
   }
-  provider, ready := providerFromEnvironment()
+  provider, ready := activeProvider(r.Context())
   if !ready {
-    fail(w, 503, "AI code review needs a configured model provider: set GQA_LLM_PROVIDER, GQA_LLM_API_KEY and GQA_LLM_SEND_PROJECT_CONTEXT=true")
+    fail(w, 503, "AI code review needs a model provider: an administrator can choose one and enter its API key in AI settings")
     return
   }
   var repoURL string

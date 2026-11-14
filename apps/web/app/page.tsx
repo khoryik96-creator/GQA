@@ -5,7 +5,7 @@ import {
   Activity, AlertTriangle, ArrowRight, BrainCircuit, CheckCircle2,
   Clock3, Database, FileCode2, FolderKanban, GitBranch, Globe2,
   History, Layers3, Loader2, Plus, Search, Send, ShieldCheck,
-  Smartphone, Sparkles, Target, Workflow, X, LogOut, LockKeyhole, type LucideIcon
+  Smartphone, Sparkles, Cpu, Target, Workflow, X, LogOut, LockKeyhole, type LucideIcon
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import type { TestSpecification } from "../components/ScenarioReview";
@@ -18,6 +18,7 @@ const TeamAccess = dynamic(() => import("../components/TeamAccess"));
 const AccountSecurity = dynamic(() => import("../components/AccountSecurity"));
 const RegressionIntelligence = dynamic(() => import("../components/RegressionIntelligence"));
 const CodeReview = dynamic(() => import("../components/CodeReview"));
+const AiSettings = dynamic(() => import("../components/AiSettings"));
 
 type AppType = "fullstack" | "web" | "api" | "backend" | "mobile";
 type Environment = "local" | "staging" | "production";
@@ -94,6 +95,7 @@ export default function CommandCenter() {
   const [loginError, setLoginError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // A project switch invalidates all outstanding results from the old tab.
@@ -267,7 +269,7 @@ export default function CommandCenter() {
     selectedProjectRef.current=null;
     setProjects([]);setSelectedId(null);setPlans([]);setMemories([]);setRuns([]);
     setAuthStatus("anonymous");setPassword("");setAccount(null);
-    setSecurityOpen(false);setView("command");
+    setSecurityOpen(false);setAiSettingsOpen(false);setView("command");
   }
 
   async function signOut() {
@@ -516,6 +518,9 @@ export default function CommandCenter() {
           <div className="breadcrumb"><FolderKanban size={17}/><span>Workspace</span><span className="slash">/</span><strong>{selected?.name || "Overview"}</strong></div>
           <div className="topbar-actions">
             <span className="preview-label"><span className="status-dot"/> {account?.email||"Local development"}</span>
+            {isAdmin&&<button className="button secondary" type="button" onClick={()=>setAiSettingsOpen(open=>!open)} aria-expanded={aiSettingsOpen}>
+              <Cpu size={15}/> AI settings
+            </button>}
             <button className="button secondary" type="button" onClick={()=>setSecurityOpen(open=>!open)}>
               <LockKeyhole size={15}/> Account security
             </button>
@@ -526,6 +531,7 @@ export default function CommandCenter() {
         </header>
 
         <div className="content">
+          {aiSettingsOpen && isAdmin && <AiSettings apiBase={API} onClose={()=>setAiSettingsOpen(false)}/>}
           {securityOpen && account && <AccountSecurity apiBase={API} email={account.email}
             onClose={()=>setSecurityOpen(false)} onSignedOut={clearSessionUI}/>}
           {error && <div className="error-banner" role="alert"><AlertTriangle size={17}/><span>{error}</span><button onClick={() => setError("")} title="Dismiss"><X size={16}/></button></div>}

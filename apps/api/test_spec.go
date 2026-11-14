@@ -213,7 +213,7 @@ func (p planningProvider) generate(ctx context.Context,input PlannerInput)(TestS
 
 func generateTestSpecification(ctx context.Context,input PlannerInput) TestSpecification{
   fallback:=heuristicSpecification(input)
-  provider,ready:=providerFromEnvironment()
+  provider,ready:=activeProvider(ctx)
   if !ready{return fallback}
   // The user's prompt is bounded by the API; keep the complete planned context small.
   if len(input.Prompt)>4000||len(input.Memories)>10 {

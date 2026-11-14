@@ -20,20 +20,39 @@ validation is not implemented yet, so every finding is stored as
 | `anthropic` (alias `claude`) | `https://api.anthropic.com` | `claude-opus-5-5` | Official Anthropic Go SDK (Messages API, streaming). `claude-sonnet-5-5` or `claude-haiku-5-5` cost less. |
 | `custom` | `GQA_LLM_CHAT_COMPLETIONS_URL` (required) | `GQA_LLM_MODEL` (required) | Any HTTPS OpenAI-compatible endpoint. Older configurations that set only the URL are treated as `custom`. |
 
-Model IDs change often. Override the default with `GQA_LLM_MODEL`
-whenever a provider renames or retires a model.
+Model IDs change often. Set the model in **AI settings** whenever a
+provider renames or retires one.
+
+### Configuring in the dashboard (recommended)
+
+An administrator opens **AI settings** (top right), chooses the provider,
+pastes its API key, optionally sets a model, allows sending project context,
+then clicks **Save settings** and **Test connection**. The test sends one
+tiny request.
+
+- Keys are encrypted with AES-256-GCM. The encryption key comes from
+  `GQA_SECRETS_KEY` in `.env`, never from the database, and each ciphertext is
+  bound to its provider name.
+- The API never returns a key. The dashboard shows only its last four
+  characters.
+- If `GQA_SECRETS_KEY` changes, saved keys show as "unreadable" and AI
+  features turn off until the keys are entered again.
+- Each change is recorded in the append-only `ai_settings_audit` table
+  (who, what, which provider; never key material).
+- Dashboard settings take precedence over environment variables. If no key
+  is saved for the selected provider, the `GQA_LLM_API_KEY` from `.env` is
+  used when it belongs to that provider.
+
+### Configuring with environment variables
 
 ```env
-# .env — switch providers by changing two lines
 GQA_LLM_PROVIDER=deepseek
 GQA_LLM_API_KEY=<your provider API key>
 GQA_LLM_MODEL=                     # optional override
 GQA_LLM_SEND_PROJECT_CONTEXT=true  # explicit consent to send source code
 ```
 
-`GQA_LLM_SEND_PROJECT_CONTEXT` stays `false` by default. **Starting a review
-sends repository source code to the selected third party.** Only enable it
-for code you are authorized to share with that provider.
+These apply only until settings are saved in the dashboard.
 
 The same provider is also used by the existing AI test planner and
 browser-flow drafter.

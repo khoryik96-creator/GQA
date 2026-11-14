@@ -144,7 +144,7 @@ func (p planningProvider) proposeBrowserFlow(ctx context.Context,input BrowserFl
 
 func generateBrowserDraft(ctx context.Context,input BrowserFlowContext)BrowserFlowDraft{
   fallback:=ruleBasedBrowserDraft(input)
-  provider,ok:=providerFromEnvironment()
+  provider,ok:=activeProvider(ctx)
   if !ok{return fallback}
   if len(input.Prompt)>2000||len(input.Memories)>10{return fallback}
   candidate,err:=provider.proposeBrowserFlow(ctx,input)

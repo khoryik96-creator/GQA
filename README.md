@@ -34,7 +34,21 @@ enterprise organizations/SSO/MFA, production security review or hardened VM
 isolation. The initial planner **does not require an LLM**; without a configured
 provider it uses explicit deterministic rules.
 
-## Get started locally
+## Quick install on Windows
+
+Double-click **`gqa-setup.bat`**. Run it again any time to update.
+
+- If you downloaded only `gqa-setup.bat`, it clones GQA into `%USERPROFILE%\GQA` first.
+- It checks Git and Docker Desktop, and offers to install missing ones with `winget`.
+- It updates the code with `git pull --ff-only`. If you changed GQA files, the update is skipped.
+- On a first install it creates `.env` with random secrets and shows the administrator password once.
+- On later runs it only fills in missing `.env` settings. Existing values, including the database passwords, are never changed.
+- It runs `docker compose up --build -d`, waits until GQA answers, and opens http://localhost:3000.
+
+Then open **AI settings** (top right, administrators only) to choose DeepSeek,
+OpenAI, Gemini or Claude and paste the API key.
+
+## Get started locally (manual)
 
 Requirements: **Docker Desktop / Docker Engine with Compose**, Git and
 sufficient memory to start PostgreSQL, Next.js, Go and Chromium containers.
@@ -165,25 +179,28 @@ of sessions across browsers. Administrators may suspend or recover ordinary
 member accounts. Requests are protected with server-enforced project
 permissions and origin-checked cookie sessions.
 
-## AI providers and code review (v0.20)
+## AI providers and code review
 
 The default QA planner is deterministic and labelled as such in the UI.
-Configure one model provider to enable AI planning, browser-flow drafting
-and the **Code Review** tab:
+To enable AI planning, browser-flow drafting and the **Code Review** tab, an
+administrator opens **AI settings** in the dashboard:
 
-```env
-GQA_LLM_PROVIDER=deepseek   # deepseek (default) | openai | gemini | anthropic | custom
-GQA_LLM_API_KEY=<provider API key>
-GQA_LLM_MODEL=              # optional; required for gemini and custom
-GQA_LLM_SEND_PROJECT_CONTEXT=true
-```
+1. Choose DeepSeek (cheapest), OpenAI, Gemini, Claude, or any OpenAI-compatible endpoint.
+2. Paste the API key. You can save keys for several providers and switch between them.
+3. Optionally change the model.
+4. Allow sending project context, then **Save** and **Test connection**.
 
-`GQA_LLM_SEND_PROJECT_CONTEXT` defaults to `false`. Code review sends
-repository **source code** to the selected provider, so do not enable it for
-code you are not authorized to share. Code review findings stay `suspected`
-until reproduced by a test, and a review with no findings does not prove the
-code is correct. See [AI code review](docs/AI_CODE_REVIEW.md) for provider
-defaults, the evidence check and limits.
+API keys are encrypted with AES-256-GCM using `GQA_SECRETS_KEY` from `.env`.
+The installer generates this key. Keys are never shown again; only the last
+four characters are displayed. Keep `GQA_SECRETS_KEY` safe: if it changes,
+saved keys become unreadable and must be entered again. Settings saved in
+the dashboard take precedence over the `GQA_LLM_*` variables in `.env`.
+
+Code review sends repository **source code** to the selected provider, so do
+not enable it for code you are not authorized to share. Code review findings
+stay `suspected` until reproduced by a test, and a review with no findings
+does not prove the code is correct. See [AI code review](docs/AI_CODE_REVIEW.md)
+for provider defaults, the evidence check and limits.
 
 The specialist execution engine and the model are separate. Connecting
 a model does not grant it autonomous shell commands or permission to run
