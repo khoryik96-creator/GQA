@@ -6,6 +6,7 @@ import "./account-security.css";
 import "./broker-jobs.css";
 import "./quality.css";
 import "./code-review.css";
+import "./ai-settings.css";
 
 export const metadata: Metadata = {
   title: "GQA | Principal QA Command Center",
