@@ -80,6 +80,7 @@ func main() {
     if _, err = db.Exec(ctx, schema, pgx.QueryExecModeSimpleProtocol); err != nil { log.Fatal("migrate schema: ", err) }
   }
   s := &server{db: db}
+  activeProvider = s.providerFromSettings
   origin := os.Getenv("ALLOWED_ORIGIN")
   if origin == "" { origin = "http://localhost:3000" }
   auth,err:=newAuthenticator(db,os.Getenv("GQA_ADMIN_PASSWORD"),origin,
@@ -132,6 +133,9 @@ func main() {
   mux.HandleFunc("POST /api/admin/users/{userId}/reset-password",auth.admin(s.adminResetPassword))
   mux.HandleFunc("POST /api/admin/users/{userId}/status",auth.admin(s.adminSetUserStatus))
   mux.HandleFunc("GET /api/admin/security-audit",auth.admin(s.accountSecurityAudit))
+  mux.HandleFunc("GET /api/admin/ai-settings",auth.admin(s.getAISettings))
+  mux.HandleFunc("POST /api/admin/ai-settings",auth.admin(s.saveAISettings))
+  mux.HandleFunc("POST /api/admin/ai-settings/test",auth.admin(budgetedAction("ai_settings_test",20,s.testAISettings)))
   mux.HandleFunc("GET /api/admin/broker-jobs",auth.admin(s.brokerJobs))
   mux.HandleFunc("GET /api/admin/broker-jobs/{id}",auth.admin(s.brokerJobs))
   mux.HandleFunc("GET /api/admin/broker-jobs/{id}/result",auth.admin(s.brokerJobs))

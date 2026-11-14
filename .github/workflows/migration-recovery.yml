@@ -50,13 +50,16 @@ jobs:
           expected_v5="$(sha256sum db-migrate/versions/0005_code_reviews.sql | cut -d ' ' -f1)"
           recorded_v5="$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT checksum FROM public.gqa_schema_migrations WHERE version=5')"
           test "$expected_v5" = "$recorded_v5"
+          expected_v6="$(sha256sum db-migrate/versions/0006_ai_provider_settings.sql | cut -d ' ' -f1)"
+          recorded_v6="$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT checksum FROM public.gqa_schema_migrations WHERE version=6')"
+          test "$expected_v6" = "$recorded_v6"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('code_reviews_project_date','code_reviews_one_running')")" = "2"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='qa_activity_project_date'")" = "1"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='browser_flow_one_revision_per_source'")" = "1"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('plans_project_created_id','test_runs_project_started_id','browser_flows_project_created_id','memories_project_created_id')")" = "4"
           test "$(docker compose exec -T db psql -U gqa -d gqa -Atc "SELECT count(*) FROM projects WHERE name='GQA legacy sentinel'")" = "1"
           docker compose run --rm migrate
-          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "5"
+          test "$(docker compose exec -T db psql -U gqa -d gqa -Atc 'SELECT count(*) FROM public.gqa_schema_migrations')" = "6"
 
       - name: Rehearse custom-format backup and transactional restore into a separate disposable database
         run: |

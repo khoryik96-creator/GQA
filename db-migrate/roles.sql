@@ -16,3 +16,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE gqa IN SCHEMA public
 -- Only database-owned source-table triggers may append QA events. The runtime
 -- principal can read, but cannot forge, modify, or delete audit rows.
 REVOKE INSERT, UPDATE, DELETE ON TABLE public.qa_activity_audit FROM gqa_app;
+
+-- AI settings changes are audited append-only; the runtime may only add rows.
+REVOKE UPDATE, DELETE ON TABLE public.ai_settings_audit FROM gqa_app;
