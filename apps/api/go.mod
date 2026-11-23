@@ -3,7 +3,7 @@ module github.com/khoryik96-creator/GQA/apps/api
 go 1.26.0
 
 require (
-	github.com/anthropics/anthropic-sdk-go/v2 v2.9.0
+	github.com/anthropics/anthropic-sdk-go/v2 v2.12.0
 	github.com/jackc/pgx/v5 v5.12.0
 	golang.org/x/crypto v0.58.0
 )
